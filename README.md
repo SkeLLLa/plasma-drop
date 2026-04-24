@@ -67,7 +67,8 @@ quicker first run. The detailed install layout and CI plan live in
 
 Version bumps, changelog updates, tags, and GitHub releases are managed with `release-plz`.
 Maintainers should use Conventional Commits so release-plz can infer the correct SemVer bump.
-CI enforces this with `opensource-nepal/commitlint@v1` on pushes and pull requests.
+CI enforces this with `opensource-nepal/commitlint@v1` on pull requests, except for Dependabot's
+generated dependency update commits.
 
 The repo release flow is:
 

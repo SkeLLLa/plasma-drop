@@ -88,11 +88,12 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ steps.crates-auth.outputs.token }}
         run: |
           set -euo pipefail
-          release-plz release --config release-plz.toml --git-token "${GITHUB_TOKEN}" -o json | tee release-plz-output.json
-          RELEASES="$(jq -c '.releases // []' release-plz-output.json)"
-          RELEASED="$(jq -r '((.releases // []) | length > 0)' release-plz-output.json)"
-          VERSION="$(jq -r '(.releases // [])[0].version // ""' release-plz-output.json)"
-          TAG_NAME="$(jq -r '(.releases // [])[0].tag // ""' release-plz-output.json)"
+          OUTPUT_FILE="${RUNNER_TEMP}/release-plz-output.json"
+          release-plz release --config release-plz.toml --git-token "${GITHUB_TOKEN}" -o json | tee "${OUTPUT_FILE}"
+          RELEASES="$(jq -c '.releases // []' "${OUTPUT_FILE}")"
+          RELEASED="$(jq -r '((.releases // []) | length > 0)' "${OUTPUT_FILE}")"
+          VERSION="$(jq -r '(.releases // [])[0].version // ""' "${OUTPUT_FILE}")"
+          TAG_NAME="$(jq -r '(.releases // [])[0].tag // ""' "${OUTPUT_FILE}")"
           echo "released=${RELEASED}" >> "${GITHUB_OUTPUT}"
           echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
           echo "tag_name=${TAG_NAME}" >> "${GITHUB_OUTPUT}"
