@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, Notify, mpsc, oneshot};
 use tracing::{debug, warn};
 use uuid::Uuid;
-use zbus::{Connection, ConnectionBuilder};
+use zbus::{Connection, connection};
 
 use super::dbus_object::PlasmaDropDbusObject;
 
@@ -95,7 +95,7 @@ impl KWinClient {
             state: state.clone(),
         };
 
-        let connection = ConnectionBuilder::session()
+        let connection = connection::Builder::session()
             .context("failed to connect to session D-Bus")?
             .name(APP_DBUS_SERVICE)
             .context("failed to acquire single-instance D-Bus name")?
