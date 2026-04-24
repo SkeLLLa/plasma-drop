@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Install stable Rust with clippy and rustfmt
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -40,7 +40,7 @@ jobs:
       attestations: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -163,7 +163,7 @@ jobs:
 
       - name: Attest build provenance
         if: ${{ steps.release-plz.outputs.released == 'true' }}
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: |
             target/release-assets/plasma-drop-${{ steps.release-plz.outputs.version }}-${{ env.RUST_TARGET }}.tar.gz
@@ -172,7 +172,7 @@ jobs:
 
       - name: Publish release assets
         if: ${{ steps.release-plz.outputs.released == 'true' }}
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.release-plz.outputs.tag_name }}
           append_body: true
