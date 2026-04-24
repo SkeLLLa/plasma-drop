@@ -12,7 +12,7 @@ env:
 jobs:
   quality:
     name: Quality gate
-    if: ${{ github.repository_owner == 'SkeLLLa' }}
+    if: ${{ github.repository_owner == 'SkeLLLa' && !contains(github.event.head_commit.message, '[skip ci]') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -29,7 +29,7 @@ jobs:
   release:
     name: Release
     needs: quality
-    if: ${{ github.repository_owner == 'SkeLLLa' }}
+    if: ${{ github.repository_owner == 'SkeLLLa' && !contains(github.event.head_commit.message, '[skip ci]') }}
     runs-on: ubuntu-latest
     concurrency:
       group: release-${{ github.ref }}
@@ -39,13 +39,12 @@ jobs:
       id-token: write
       attestations: write
       pull-requests: read
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          persist-credentials: false
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -59,8 +58,36 @@ jobs:
         id: crates-auth
         uses: rust-lang/crates-io-auth-action@v1
 
-      - name: Run release-plz
+      - name: Bump version and changelog
+        id: release-plz-update
+        uses: release-plz/action@v0.5
+        with:
+          command: update
+          config: release-plz.toml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Commit version bump
+        id: commit
+        run: |
+          if git diff --quiet && git diff --cached --quiet; then
+            echo "released=false" >> "${GITHUB_OUTPUT}"
+            echo "No changes produced by release-plz update"
+            exit 0
+          fi
+          VERSION="$(awk -F '"' '/^version/ { print $2; exit }' Cargo.toml)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore(release): v${VERSION} [skip ci]"
+          git push origin HEAD:master
+          echo "released=true" >> "${GITHUB_OUTPUT}"
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "tag_name=v${VERSION}" >> "${GITHUB_OUTPUT}"
+
+      - name: Publish to crates.io and create GitHub release
         id: release-plz
+        if: ${{ steps.commit.outputs.released == 'true' }}
         uses: release-plz/action@v0.5
         with:
           command: release
@@ -70,40 +97,21 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ steps.crates-auth.outputs.token }}
 
       - name: Install packaging tools
-        if: ${{ steps.release-plz.outputs.releases_created == 'true' }}
+        if: ${{ steps.commit.outputs.released == 'true' }}
         run: cargo install --locked cargo-deb cargo-generate-rpm
 
       - name: Install package verification tools
-        if: ${{ steps.release-plz.outputs.releases_created == 'true' }}
+        if: ${{ steps.commit.outputs.released == 'true' }}
         run: sudo apt-get update && sudo apt-get install -y rpm
 
-      - name: Derive release metadata
-        if: ${{ steps.release-plz.outputs.releases_created == 'true' }}
-        id: release-meta
-        env:
-          RELEASES: ${{ steps.release-plz.outputs.releases }}
-        run: |
-          VERSION="$(jq -r '.[0].version' <<< "${RELEASES}")"
-          TAG_NAME="$(jq -r '.[0].tag' <<< "${RELEASES}")"
-          if [ -z "${VERSION}" ] || [ "${VERSION}" = "null" ]; then
-            echo "release-plz did not report a release version" >&2
-            exit 1
-          fi
-          if [ -z "${TAG_NAME}" ] || [ "${TAG_NAME}" = "null" ]; then
-            echo "release-plz did not report a release tag" >&2
-            exit 1
-          fi
-          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
-          echo "tag_name=${TAG_NAME}" >> "${GITHUB_OUTPUT}"
-
       - name: Build release binary
-        if: ${{ steps.release-plz.outputs.releases_created == 'true' }}
+        if: ${{ steps.commit.outputs.released == 'true' }}
         run: cargo build --release --locked --target "${RUST_TARGET}"
 
       - name: Assemble binary distribution
-        if: ${{ steps.release-plz.outputs.releases_created == 'true' }}
+        if: ${{ steps.commit.outputs.released == 'true' }}
         env:
-          VERSION: ${{ steps.release-meta.outputs.version }}
+          VERSION: ${{ steps.commit.outputs.version }}
         run: |
           DIST_ROOT="target/dist/plasma-drop-${VERSION}-${RUST_TARGET}"
           mkdir -p "${DIST_ROOT}/bin" "${DIST_ROOT}/share/systemd/user" "${DIST_ROOT}/share/plasma-drop/examples"
@@ -115,33 +123,33 @@ jobs:
           tar -C target/dist -czf "target/dist/plasma-drop-${VERSION}-${RUST_TARGET}.tar.gz" "plasma-drop-${VERSION}-${RUST_TARGET}"
 
       - name: Build deb package
-        if: ${{ steps.release-plz.outputs.releases_created == 'true' }}
-        run: cargo deb --no-build --target "${RUST_TARGET}" --output "target/debian/plasma-drop_${{ steps.release-meta.outputs.version }}_amd64.deb"
+        if: ${{ steps.commit.outputs.released == 'true' }}
+        run: cargo deb --no-build --target "${RUST_TARGET}" --output "target/debian/plasma-drop_${{ steps.commit.outputs.version }}_amd64.deb"
 
       - name: Build rpm package
-        if: ${{ steps.release-plz.outputs.releases_created == 'true' }}
-        run: cargo generate-rpm --target "${RUST_TARGET}" --output "target/generate-rpm/plasma-drop-${{ steps.release-meta.outputs.version }}-1.x86_64.rpm"
+        if: ${{ steps.commit.outputs.released == 'true' }}
+        run: cargo generate-rpm --target "${RUST_TARGET}" --output "target/generate-rpm/plasma-drop-${{ steps.commit.outputs.version }}-1.x86_64.rpm"
 
       - name: Verify binary archive contents
-        if: ${{ steps.release-plz.outputs.releases_created == 'true' }}
+        if: ${{ steps.commit.outputs.released == 'true' }}
         run: |
-          tar -tzf "target/dist/plasma-drop-${{ steps.release-meta.outputs.version }}-${RUST_TARGET}.tar.gz" | grep -E 'install-user.sh|bin/plasma-drop|share/systemd/user/plasma-drop.service|share/plasma-drop/examples/config.toml'
+          tar -tzf "target/dist/plasma-drop-${{ steps.commit.outputs.version }}-${RUST_TARGET}.tar.gz" | grep -E 'install-user.sh|bin/plasma-drop|share/systemd/user/plasma-drop.service|share/plasma-drop/examples/config.toml'
 
       - name: Verify deb package contents
-        if: ${{ steps.release-plz.outputs.releases_created == 'true' }}
+        if: ${{ steps.commit.outputs.released == 'true' }}
         run: |
-          dpkg-deb --contents "target/debian/plasma-drop_${{ steps.release-meta.outputs.version }}_amd64.deb" | grep -E 'usr/bin/plasma-drop|usr/lib/systemd/user/plasma-drop.service|usr/share/plasma-drop/examples/config.toml'
+          dpkg-deb --contents "target/debian/plasma-drop_${{ steps.commit.outputs.version }}_amd64.deb" | grep -E 'usr/bin/plasma-drop|usr/lib/systemd/user/plasma-drop.service|usr/share/plasma-drop/examples/config.toml'
 
       - name: Verify rpm package contents
-        if: ${{ steps.release-plz.outputs.releases_created == 'true' }}
+        if: ${{ steps.commit.outputs.released == 'true' }}
         run: |
-          rpm -qlp "target/generate-rpm/plasma-drop-${{ steps.release-meta.outputs.version }}-1.x86_64.rpm" | grep -E '/usr/bin/plasma-drop|/usr/lib/systemd/user/plasma-drop.service|/usr/share/plasma-drop/examples/config.toml'
+          rpm -qlp "target/generate-rpm/plasma-drop-${{ steps.commit.outputs.version }}-1.x86_64.rpm" | grep -E '/usr/bin/plasma-drop|/usr/lib/systemd/user/plasma-drop.service|/usr/share/plasma-drop/examples/config.toml'
 
       - name: Stage release artifacts
-        if: ${{ steps.release-plz.outputs.releases_created == 'true' }}
+        if: ${{ steps.commit.outputs.released == 'true' }}
         id: stage
         env:
-          VERSION: ${{ steps.release-meta.outputs.version }}
+          VERSION: ${{ steps.commit.outputs.version }}
         run: |
           STAGE="target/release-assets"
           mkdir -p "${STAGE}"
@@ -149,55 +157,25 @@ jobs:
           cp "target/debian/plasma-drop_${VERSION}_amd64.deb" "${STAGE}/"
           cp "target/generate-rpm/plasma-drop-${VERSION}-1.x86_64.rpm" "${STAGE}/"
           ( cd "${STAGE}" && sha256sum -- * > SHA256SUMS )
-          echo "dir=${STAGE}" >> "${GITHUB_OUTPUT}"
 
       - name: Attest build provenance
-        if: ${{ steps.release-plz.outputs.releases_created == 'true' }}
+        if: ${{ steps.commit.outputs.released == 'true' }}
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: |
-            target/release-assets/plasma-drop-${{ steps.release-meta.outputs.version }}-${{ env.RUST_TARGET }}.tar.gz
-            target/release-assets/plasma-drop_${{ steps.release-meta.outputs.version }}_amd64.deb
-            target/release-assets/plasma-drop-${{ steps.release-meta.outputs.version }}-1.x86_64.rpm
+            target/release-assets/plasma-drop-${{ steps.commit.outputs.version }}-${{ env.RUST_TARGET }}.tar.gz
+            target/release-assets/plasma-drop_${{ steps.commit.outputs.version }}_amd64.deb
+            target/release-assets/plasma-drop-${{ steps.commit.outputs.version }}-1.x86_64.rpm
 
       - name: Publish release assets
-        if: ${{ steps.release-plz.outputs.releases_created == 'true' }}
+        if: ${{ steps.commit.outputs.released == 'true' }}
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.release-meta.outputs.tag_name }}
+          tag_name: ${{ steps.commit.outputs.tag_name }}
           append_body: true
           fail_on_unmatched_files: true
           files: |
-            target/release-assets/plasma-drop-${{ steps.release-meta.outputs.version }}-${{ env.RUST_TARGET }}.tar.gz
-            target/release-assets/plasma-drop_${{ steps.release-meta.outputs.version }}_amd64.deb
-            target/release-assets/plasma-drop-${{ steps.release-meta.outputs.version }}-1.x86_64.rpm
+            target/release-assets/plasma-drop-${{ steps.commit.outputs.version }}-${{ env.RUST_TARGET }}.tar.gz
+            target/release-assets/plasma-drop_${{ steps.commit.outputs.version }}_amd64.deb
+            target/release-assets/plasma-drop-${{ steps.commit.outputs.version }}-1.x86_64.rpm
             target/release-assets/SHA256SUMS
-
-  release-pr:
-    name: Release PR
-    needs: [quality, release]
-    if: ${{ github.repository_owner == 'SkeLLLa' }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
-    concurrency:
-      group: release-${{ github.ref }}
-      cancel-in-progress: false
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Run release-plz
-        uses: release-plz/action@v0.5
-        with:
-          command: release-pr
-          config: release-plz.toml
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
