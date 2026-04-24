@@ -2,11 +2,17 @@ name: CI
 
 on:
   push:
+    branches: [master]
   pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   conventional-commits:
     name: Conventional commit messages
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -16,6 +22,7 @@ jobs:
         uses: opensource-nepal/commitlint@v1
 
   rust-quality:
+    name: Rust quality (stable)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,7 +30,39 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy,rustfmt
-      - name: Cache cargo registry
+      - name: Cache cargo
         uses: Swatinem/rust-cache@v2
       - name: Run quality checks
         run: make check
+
+  msrv:
+    name: MSRV build (1.75)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install MSRV toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.75"
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: msrv
+      - name: Build
+        run: cargo build --locked --all-targets
+      - name: Test
+        run: cargo test --locked
+
+  audit:
+    name: Cargo audit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      checks: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Audit dependencies
+        uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}

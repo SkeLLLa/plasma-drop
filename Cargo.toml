@@ -80,7 +80,7 @@ The package installs the binary, a user systemd unit, and an example
 configuration so users can enable the service with minimal setup.
 """
 assets = [
-  ["target/release/plasma-drop", "usr/bin/plasma-drop", "755"],
+  ["target/x86_64-unknown-linux-gnu/release/plasma-drop", "usr/bin/plasma-drop", "755"],
   ["packaging/systemd/plasma-drop.packaged.service", "usr/lib/systemd/user/plasma-drop.service", "644"],
   ["resources/example-config.toml", "usr/share/plasma-drop/examples/config.toml", "644"],
   ["README.md", "usr/share/doc/plasma-drop/README.md", "644"],
@@ -91,7 +91,7 @@ assets = [
 summary = "KDE Plasma 6 dropdown app launcher"
 license = "GPL-3.0-or-later"
 assets = [
-  { source = "target/release/plasma-drop", dest = "/usr/bin/plasma-drop", mode = "755" },
+  { source = "target/x86_64-unknown-linux-gnu/release/plasma-drop", dest = "/usr/bin/plasma-drop", mode = "755" },
   { source = "packaging/systemd/plasma-drop.packaged.service", dest = "/usr/lib/systemd/user/plasma-drop.service", mode = "644", doc = false },
   { source = "resources/example-config.toml", dest = "/usr/share/plasma-drop/examples/config.toml", mode = "644", doc = true },
   { source = "README.md", dest = "/usr/share/doc/plasma-drop/README.md", mode = "644", doc = true },

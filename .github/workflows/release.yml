@@ -1,32 +1,62 @@
-name: Release-plz
+name: Release
 
 on:
   push:
     branches:
       - master
 
+env:
+  CARGO_TERM_COLOR: always
+  RUST_TARGET: x86_64-unknown-linux-gnu
+
 jobs:
-  release-plz-release:
-    name: Release-plz release
-    runs-on: ubuntu-latest
+  quality:
+    name: Quality gate
     if: ${{ github.repository_owner == 'SkeLLLa' }}
-    env:
-      CARGO_TERM_COLOR: always
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install stable Rust with clippy and rustfmt
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy,rustfmt
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Run quality checks
+        run: make check
+
+  release:
+    name: Release
+    needs: quality
+    if: ${{ github.repository_owner == 'SkeLLLa' }}
+    runs-on: ubuntu-latest
+    concurrency:
+      group: release-${{ github.ref }}
+      cancel-in-progress: false
     permissions:
       contents: write
       id-token: write
+      attestations: write
       pull-requests: read
     steps:
-      - &checkout
-        name: Checkout repository
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: false
 
-      - &install-rust
-        name: Install Rust toolchain
+      - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Authenticate to crates.io (trusted publishing)
+        id: crates-auth
+        uses: rust-lang/crates-io-auth-action@v1
 
       - name: Run release-plz
         id: release-plz
@@ -36,10 +66,7 @@ jobs:
           config: release-plz.toml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Cache cargo registry
-        if: ${{ steps.release-plz.outputs.releases_created == 'true' }}
-        uses: Swatinem/rust-cache@v2
+          CARGO_REGISTRY_TOKEN: ${{ steps.crates-auth.outputs.token }}
 
       - name: Install packaging tools
         if: ${{ steps.release-plz.outputs.releases_created == 'true' }}
@@ -70,34 +97,34 @@ jobs:
 
       - name: Build release binary
         if: ${{ steps.release-plz.outputs.releases_created == 'true' }}
-        run: cargo build --release
+        run: cargo build --release --locked --target "${RUST_TARGET}"
 
       - name: Assemble binary distribution
         if: ${{ steps.release-plz.outputs.releases_created == 'true' }}
         env:
           VERSION: ${{ steps.release-meta.outputs.version }}
         run: |
-          DIST_ROOT="target/dist/plasma-drop-${VERSION}-x86_64-unknown-linux-gnu"
+          DIST_ROOT="target/dist/plasma-drop-${VERSION}-${RUST_TARGET}"
           mkdir -p "${DIST_ROOT}/bin" "${DIST_ROOT}/share/systemd/user" "${DIST_ROOT}/share/plasma-drop/examples"
-          install -m 755 target/release/plasma-drop "${DIST_ROOT}/bin/plasma-drop"
+          install -m 755 "target/${RUST_TARGET}/release/plasma-drop" "${DIST_ROOT}/bin/plasma-drop"
           install -m 755 packaging/dist/install-user.sh "${DIST_ROOT}/install-user.sh"
           install -m 644 packaging/systemd/plasma-drop.packaged.service "${DIST_ROOT}/share/systemd/user/plasma-drop.service"
           install -m 644 resources/example-config.toml "${DIST_ROOT}/share/plasma-drop/examples/config.toml"
           install -m 644 README.md COPYING "${DIST_ROOT}/"
-          tar -C target/dist -czf "target/dist/plasma-drop-${VERSION}-x86_64-unknown-linux-gnu.tar.gz" "plasma-drop-${VERSION}-x86_64-unknown-linux-gnu"
+          tar -C target/dist -czf "target/dist/plasma-drop-${VERSION}-${RUST_TARGET}.tar.gz" "plasma-drop-${VERSION}-${RUST_TARGET}"
 
       - name: Build deb package
         if: ${{ steps.release-plz.outputs.releases_created == 'true' }}
-        run: cargo deb --no-build --output "target/debian/plasma-drop_${{ steps.release-meta.outputs.version }}_amd64.deb"
+        run: cargo deb --no-build --target "${RUST_TARGET}" --output "target/debian/plasma-drop_${{ steps.release-meta.outputs.version }}_amd64.deb"
 
       - name: Build rpm package
         if: ${{ steps.release-plz.outputs.releases_created == 'true' }}
-        run: cargo generate-rpm --target x86_64-unknown-linux-gnu --output "target/generate-rpm/plasma-drop-${{ steps.release-meta.outputs.version }}-1.x86_64.rpm"
+        run: cargo generate-rpm --target "${RUST_TARGET}" --output "target/generate-rpm/plasma-drop-${{ steps.release-meta.outputs.version }}-1.x86_64.rpm"
 
       - name: Verify binary archive contents
         if: ${{ steps.release-plz.outputs.releases_created == 'true' }}
         run: |
-          tar -tzf "target/dist/plasma-drop-${{ steps.release-meta.outputs.version }}-x86_64-unknown-linux-gnu.tar.gz" | grep -E 'install-user.sh|bin/plasma-drop|share/systemd/user/plasma-drop.service|share/plasma-drop/examples/config.toml'
+          tar -tzf "target/dist/plasma-drop-${{ steps.release-meta.outputs.version }}-${RUST_TARGET}.tar.gz" | grep -E 'install-user.sh|bin/plasma-drop|share/systemd/user/plasma-drop.service|share/plasma-drop/examples/config.toml'
 
       - name: Verify deb package contents
         if: ${{ steps.release-plz.outputs.releases_created == 'true' }}
@@ -109,50 +136,62 @@ jobs:
         run: |
           rpm -qlp "target/generate-rpm/plasma-drop-${{ steps.release-meta.outputs.version }}-1.x86_64.rpm" | grep -E '/usr/bin/plasma-drop|/usr/lib/systemd/user/plasma-drop.service|/usr/share/plasma-drop/examples/config.toml'
 
-      - name: Upload binary distribution
+      - name: Stage release artifacts
         if: ${{ steps.release-plz.outputs.releases_created == 'true' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: plasma-drop-${{ steps.release-meta.outputs.version }}-x86_64-unknown-linux-gnu
-          path: target/dist/plasma-drop-${{ steps.release-meta.outputs.version }}-x86_64-unknown-linux-gnu.tar.gz
+        id: stage
+        env:
+          VERSION: ${{ steps.release-meta.outputs.version }}
+        run: |
+          STAGE="target/release-assets"
+          mkdir -p "${STAGE}"
+          cp "target/dist/plasma-drop-${VERSION}-${RUST_TARGET}.tar.gz" "${STAGE}/"
+          cp "target/debian/plasma-drop_${VERSION}_amd64.deb" "${STAGE}/"
+          cp "target/generate-rpm/plasma-drop-${VERSION}-1.x86_64.rpm" "${STAGE}/"
+          ( cd "${STAGE}" && sha256sum -- * > SHA256SUMS )
+          echo "dir=${STAGE}" >> "${GITHUB_OUTPUT}"
 
-      - name: Upload deb package
+      - name: Attest build provenance
         if: ${{ steps.release-plz.outputs.releases_created == 'true' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/attest-build-provenance@v2
         with:
-          name: plasma-drop-${{ steps.release-meta.outputs.version }}-deb
-          path: target/debian/plasma-drop_${{ steps.release-meta.outputs.version }}_amd64.deb
-
-      - name: Upload rpm package
-        if: ${{ steps.release-plz.outputs.releases_created == 'true' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: plasma-drop-${{ steps.release-meta.outputs.version }}-rpm
-          path: target/generate-rpm/plasma-drop-${{ steps.release-meta.outputs.version }}-1.x86_64.rpm
+          subject-path: |
+            target/release-assets/plasma-drop-${{ steps.release-meta.outputs.version }}-${{ env.RUST_TARGET }}.tar.gz
+            target/release-assets/plasma-drop_${{ steps.release-meta.outputs.version }}_amd64.deb
+            target/release-assets/plasma-drop-${{ steps.release-meta.outputs.version }}-1.x86_64.rpm
 
       - name: Publish release assets
         if: ${{ steps.release-plz.outputs.releases_created == 'true' }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.release-meta.outputs.tag_name }}
+          append_body: true
+          fail_on_unmatched_files: true
           files: |
-            target/dist/plasma-drop-${{ steps.release-meta.outputs.version }}-x86_64-unknown-linux-gnu.tar.gz
-            target/debian/plasma-drop_${{ steps.release-meta.outputs.version }}_amd64.deb
-            target/generate-rpm/plasma-drop-${{ steps.release-meta.outputs.version }}-1.x86_64.rpm
+            target/release-assets/plasma-drop-${{ steps.release-meta.outputs.version }}-${{ env.RUST_TARGET }}.tar.gz
+            target/release-assets/plasma-drop_${{ steps.release-meta.outputs.version }}_amd64.deb
+            target/release-assets/plasma-drop-${{ steps.release-meta.outputs.version }}-1.x86_64.rpm
+            target/release-assets/SHA256SUMS
 
-  release-plz-pr:
-    name: Release-plz PR
-    runs-on: ubuntu-latest
+  release-pr:
+    name: Release PR
+    needs: quality
     if: ${{ github.repository_owner == 'SkeLLLa' }}
+    runs-on: ubuntu-latest
     permissions:
       contents: write
       pull-requests: write
     concurrency:
-      group: release-plz-${{ github.ref }}
+      group: release-pr-${{ github.ref }}
       cancel-in-progress: false
     steps:
-      - *checkout
-      - *install-rust
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Run release-plz
         uses: release-plz/action@v0.5
