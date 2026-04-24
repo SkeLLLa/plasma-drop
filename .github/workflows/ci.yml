@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  conventional-commits:
+    name: Conventional commit messages
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Verify Conventional Commit messages
+        uses: opensource-nepal/commitlint@v1
+
+  rust-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install stable Rust with clippy and rustfmt
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy,rustfmt
+      - name: Cache cargo registry
+        uses: Swatinem/rust-cache@v2
+      - name: Run quality checks
+        run: make check

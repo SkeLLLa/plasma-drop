@@ -1,0 +1,18 @@
+{
+  "format_on_save": "on",
+  "remove_trailing_whitespace_on_save": true,
+  "ensure_final_newline_on_save": true,
+  "preferred_line_length": 100,
+  "languages": {
+    "Rust": {
+      "format_on_save": "on",
+      "formatter": "language_server",
+      "tab_size": 4,
+      "hard_tabs": false
+    },
+    "TOML": {
+      "tab_size": 2,
+      "hard_tabs": false
+    }
+  }
+}

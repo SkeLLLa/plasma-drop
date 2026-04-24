@@ -1,0 +1,13 @@
+[Unit]
+Description=PlasmaDrop quake-style launcher
+After=plasma-kwin_wayland.service
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/plasma-drop --config %h/.config/plasma-drop/config.toml
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target

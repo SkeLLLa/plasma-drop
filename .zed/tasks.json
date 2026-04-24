@@ -1,0 +1,30 @@
+[
+  {
+    "label": "Rust: Check",
+    "command": "mise",
+    "args": ["run", "check"],
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false
+  },
+  {
+    "label": "Rust: Clippy",
+    "command": "mise",
+    "args": ["run", "lint"],
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false
+  },
+  {
+    "label": "Rust: Test",
+    "command": "mise",
+    "args": ["run", "test"],
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false
+  },
+  {
+    "label": "Rust: Doc",
+    "command": "mise",
+    "args": ["run", "doc"],
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false
+  }
+]

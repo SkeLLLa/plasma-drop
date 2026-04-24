@@ -1,0 +1,42 @@
+# Rust build output
+/target/
+
+# Rust coverage and profiling output
+/coverage/
+/llvm-cov-target/
+/tarpaulin-report.html
+*.profraw
+*.profdata
+
+# Logs and temporary files
+*.log
+*.out
+*.err
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+*~
+
+# Local environment files
+.env
+.env.*
+!.env.example
+.direnv/
+.mise.local.toml
+
+# Editor and OS metadata
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local assistant and analysis state
+.claude/settings.local.json
+.codex/
+.code-review-graph/
+.mcp.json
+
+# Local or historical documentation workspaces
+/docs/**/

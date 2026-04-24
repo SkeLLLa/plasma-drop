@@ -1,0 +1,99 @@
+[package]
+name = "plasma-drop"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.75"
+description = "KDE Plasma 6 dropdown app launcher"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/SkeLLLa/plasma-drop"
+readme = "README.md"
+keywords = ["kde", "plasma", "kwin", "launcher", "dropdown", "yakuake", "wayland", "window-management"]
+categories = ["command-line-utilities"]
+exclude = [
+  "/.claude/",
+  "/.code-review-graph/",
+  "/.codex/",
+  "/.github/",
+  "/.gitignore",
+  "/.mcp.json",
+  "/.mise.toml",
+  "/.zed/",
+  "/AGENTS.md",
+  "/Makefile",
+  "/clippy.toml",
+  "/docs/*/",
+  "/packaging/dist/",
+  "/release-plz.toml",
+  "/target/",
+  "/wtq",
+]
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+unused_lifetimes = "deny"
+unused_qualifications = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -2 }
+cargo = { level = "warn", priority = -3 }
+nursery = { level = "warn", priority = -4 }
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+multiple_crate_versions = "allow"
+must_use_candidate = "allow"
+redundant_pub_crate = "allow"
+similar_names = "allow"
+struct_excessive_bools = "allow"
+too_many_lines = "allow"
+
+[dependencies]
+anyhow = "1.0"
+async-trait = "0.1"
+clap = { version = "4.5", features = ["derive"] }
+regex = "1.11"
+libc = "0.2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.42", features = ["fs", "macros", "process", "rt-multi-thread", "signal", "sync", "time"] }
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1.11", features = ["serde", "v4"] }
+zbus = { version = "4.4", features = ["tokio"] }
+
+[package.metadata.deb]
+maintainer = "SkeLLLa"
+copyright = "2026, SkeLLLa"
+depends = "$auto"
+section = "utils"
+priority = "optional"
+extended-description = """\
+plasma-drop is a KDE Plasma 6 dropdown launcher for Wayland sessions.
+The package installs the binary, a user systemd unit, and an example
+configuration so users can enable the service with minimal setup.
+"""
+assets = [
+  ["target/release/plasma-drop", "usr/bin/plasma-drop", "755"],
+  ["packaging/systemd/plasma-drop.packaged.service", "usr/lib/systemd/user/plasma-drop.service", "644"],
+  ["resources/example-config.toml", "usr/share/plasma-drop/examples/config.toml", "644"],
+  ["README.md", "usr/share/doc/plasma-drop/README.md", "644"],
+  ["COPYING", "usr/share/doc/plasma-drop/COPYING", "644"],
+]
+
+[package.metadata.generate-rpm]
+summary = "KDE Plasma 6 dropdown app launcher"
+license = "GPL-3.0-or-later"
+assets = [
+  { source = "target/release/plasma-drop", dest = "/usr/bin/plasma-drop", mode = "755" },
+  { source = "packaging/systemd/plasma-drop.packaged.service", dest = "/usr/lib/systemd/user/plasma-drop.service", mode = "644", doc = false },
+  { source = "resources/example-config.toml", dest = "/usr/share/plasma-drop/examples/config.toml", mode = "644", doc = true },
+  { source = "README.md", dest = "/usr/share/doc/plasma-drop/README.md", mode = "644", doc = true },
+  { source = "COPYING", dest = "/usr/share/doc/plasma-drop/COPYING", mode = "644", doc = true },
+]

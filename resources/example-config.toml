@@ -1,0 +1,76 @@
+[[app]]
+name = "dolphin"
+hotkey = "super+f9"
+filename = "/usr/bin/dolphin"
+attach_mode = "find-or-start"
+
+[app.placement]
+width = "50%"
+height = "100%"
+position = "left"
+
+[app.animation]
+style = "slide"
+easing = "ease-out"
+duration_ms = 1000
+
+[[app]]
+name = "kate"
+hotkey = "super+f7"
+filename = "/usr/bin/kate"
+attach_mode = "find-or-start"
+
+[app.placement]
+width = "50%"
+height = "100%"
+position = "center"
+
+[app.animation]
+style = "fade"
+easing = "ease-in-out"
+duration_ms = 1000
+
+[[app]]
+name = "okular"
+hotkey = "super+f8"
+filename = "/usr/bin/okular"
+attach_mode = "find-or-start"
+
+[app.placement]
+width = "66%"
+height = "100%"
+position = "right"
+
+[app.animation]
+style = "slide-fade"
+easing = "linear"
+duration_ms = 1000
+
+[[app]]
+name = "chromium-flatpak"
+hotkey = "super+f6"
+filename = "io.github.ungoogled_software.ungoogled_chromium"
+process_name = "io\\.github\\.ungoogled_software\\.ungoogled_chromium|chromium|chrome"
+command = [
+  "/usr/bin/flatpak",
+  "run",
+  "--branch=stable",
+  "--arch=x86_64",
+  "--command=/app/bin/chromium",
+  "--file-forwarding",
+  "io.github.ungoogled_software.ungoogled_chromium",
+  "@@u",
+  "%U",
+  "@@",
+]
+attach_mode = "find-or-start"
+
+[app.placement]
+width = "50%"
+height = "100%"
+position = "left"
+
+[app.animation]
+style = "none"
+easing = "ease-out"
+duration_ms = 0
