@@ -1,7 +1,7 @@
 # plasma-drop
 
 [![CI](https://github.com/SkeLLLa/plasma-drop/actions/workflows/ci.yml/badge.svg)](https://github.com/SkeLLLa/plasma-drop/actions/workflows/ci.yml)
-[![Release](https://github.com/SkeLLLa/plasma-drop/actions/workflows/release-plz.yml/badge.svg)](https://github.com/SkeLLLa/plasma-drop/actions/workflows/release-plz.yml)
+[![Release](https://github.com/SkeLLLa/plasma-drop/actions/workflows/release.yml/badge.svg)](https://github.com/SkeLLLa/plasma-drop/actions/workflows/release.yml)
 [![Crates.io](https://img.shields.io/crates/v/plasma-drop.svg)](https://crates.io/crates/plasma-drop)
 [![docs.rs](https://docs.rs/plasma-drop/badge.svg)](https://docs.rs/plasma-drop)
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](COPYING)
@@ -72,14 +72,14 @@ CI enforces this with `opensource-nepal/commitlint@v1` on pushes and pull reques
 The repo release flow is:
 
 1. Push commits to `master`
-2. `release-plz` opens or updates a release PR
-3. Merge the release PR
-4. `release-plz` creates the tag and GitHub release
+2. `release-plz update` updates the version and `CHANGELOG.md` directly in the workflow checkout
+3. The workflow commits that release bump back to `master`
+4. `release-plz release` publishes the crate, creates the tag, and creates the GitHub release
 5. The same workflow attaches the `tar.gz`, `deb`, and `rpm` assets to that release
 
 Crates.io publishing uses trusted publishing through GitHub Actions OIDC. After the first manual
-crate publish, configure crates.io to trust `SkeLLLa/plasma-drop` and workflow
-`release-plz.yml`; no long-lived Cargo registry token is required for later releases.
+crate publish, configure crates.io to trust `SkeLLLa/plasma-drop` and workflow `release.yml`;
+no long-lived Cargo registry token is required for later releases.
 
 ## Cargo Install
 

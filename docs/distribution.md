@@ -55,31 +55,32 @@ exposed through CLI flags:
 GitHub Actions keeps source verification separate from release automation:
 
 - `ci.yml`: fast quality checks on pushes and pull requests.
-- `release-plz.yml`: open the release PR on `master`, then create the tag, publish the crate,
-  create the GitHub release, build release artifacts, and attach them to that release when the PR
-  is merged.
+- `release.yml`: update the version and `CHANGELOG.md` directly on `master`, then create the tag,
+  publish the crate, create the GitHub release, build release artifacts, and attach them to that
+  release.
 
 The release flow should:
 
 1. `release-plz` analyzes commit history on `master`.
-2. It opens or updates a release PR with the next version and `CHANGELOG.md` changes.
-3. After the release PR is merged, `release-plz` creates the tag, publishes to crates.io, and
-   creates the GitHub release.
-4. The same workflow builds the optimized binary once.
-5. It assembles the binary tarball with the install helper and runtime assets.
-6. It builds `deb` via `cargo-deb`.
-7. It builds `rpm` via `cargo-generate-rpm`.
-8. It verifies package contents before upload.
-9. It attaches the `tar.gz`, `deb`, and `rpm` files to the GitHub release.
+2. `release-plz update` edits the next version and `CHANGELOG.md` changes in the workflow checkout.
+3. The workflow commits that release bump directly back to `master`.
+4. `release-plz release` creates the tag, publishes to crates.io, and creates the GitHub release.
+5. The same workflow builds the optimized binary once.
+6. It assembles the binary tarball with the install helper and runtime assets.
+7. It builds `deb` via `cargo-deb`.
+8. It builds `rpm` via `cargo-generate-rpm`.
+9. It verifies package contents before upload.
+10. It attaches the `tar.gz`, `deb`, and `rpm` files to the GitHub release.
 
 The release workflow uses the default `GITHUB_TOKEN` for repository operations. It does not depend
 on a PAT to trigger a second workflow.
 
 ## Crates.io Trusted Publishing
 
-`release-plz.yml` has `id-token: write` on the release job and does not set
-`CARGO_REGISTRY_TOKEN`, so release-plz can request a short-lived crates.io token through GitHub
-Actions OIDC.
+`release.yml` has `id-token: write` on the release job and uses
+`rust-lang/crates-io-auth-action` to request a short-lived crates.io token through GitHub Actions
+OIDC. That token is passed to release-plz through `CARGO_REGISTRY_TOKEN`; no long-lived Cargo
+registry secret is stored in the repository.
 
 Trusted publishing cannot create a brand-new crate. Publish the first version manually, then
 configure trusted publishing on crates.io for subsequent releases:
@@ -95,10 +96,11 @@ configure trusted publishing on crates.io for subsequent releases:
    - Publisher: `GitHub`
    - Repository owner: `SkeLLLa`
    - Repository name: `plasma-drop`
-   - Workflow filename: `release-plz.yml`
+   - Workflow filename: `release.yml`
    - Environment name: empty, unless the workflow later adds a GitHub Actions environment
 
-After that setup, future release-plz runs can publish without `CARGO_REGISTRY_TOKEN`.
+After that setup, future release-plz runs can publish without a stored `CARGO_REGISTRY_TOKEN`
+secret.
 
 ## First-Run Flow
 

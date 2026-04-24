@@ -1,7 +1,6 @@
 [workspace]
 changelog_update = true
 git_release_enable = true
-pr_labels = ["release"]
 release_always = false
 semver_check = false
 
