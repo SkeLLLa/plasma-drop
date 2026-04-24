@@ -7,7 +7,7 @@ description = "KDE Plasma 6 dropdown app launcher"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/SkeLLLa/plasma-drop"
 readme = "README.md"
-keywords = ["kde", "plasma", "kwin", "launcher", "dropdown", "yakuake", "wayland", "window-management"]
+keywords = ["kde", "plasma", "launcher", "dropdown", "wayland"]
 categories = ["command-line-utilities"]
 exclude = [
   "/.claude/",
