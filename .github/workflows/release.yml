@@ -71,7 +71,6 @@ jobs:
         id: commit
         run: |
           if git diff --quiet && git diff --cached --quiet; then
-            echo "released=false" >> "${GITHUB_OUTPUT}"
             echo "No changes produced by release-plz update"
             exit 0
           fi
@@ -81,34 +80,40 @@ jobs:
           git add -A
           git commit -m "chore(release): v${VERSION} [skip ci]"
           git push origin HEAD:master
-          echo "released=true" >> "${GITHUB_OUTPUT}"
-          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
-          echo "tag_name=v${VERSION}" >> "${GITHUB_OUTPUT}"
 
       - name: Publish to crates.io and create GitHub release
         id: release-plz
-        if: ${{ steps.commit.outputs.released == 'true' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CARGO_REGISTRY_TOKEN: ${{ steps.crates-auth.outputs.token }}
-        run: release-plz release --config release-plz.toml --git-token "${GITHUB_TOKEN}"
+        run: |
+          set -euo pipefail
+          release-plz release --config release-plz.toml --git-token "${GITHUB_TOKEN}" -o json | tee release-plz-output.json
+          RELEASES="$(jq -c '.releases // []' release-plz-output.json)"
+          RELEASED="$(jq -r '((.releases // []) | length > 0)' release-plz-output.json)"
+          VERSION="$(jq -r '(.releases // [])[0].version // ""' release-plz-output.json)"
+          TAG_NAME="$(jq -r '(.releases // [])[0].tag // ""' release-plz-output.json)"
+          echo "released=${RELEASED}" >> "${GITHUB_OUTPUT}"
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "tag_name=${TAG_NAME}" >> "${GITHUB_OUTPUT}"
+          echo "releases=${RELEASES}" >> "${GITHUB_OUTPUT}"
 
       - name: Install packaging tools
-        if: ${{ steps.commit.outputs.released == 'true' }}
+        if: ${{ steps.release-plz.outputs.released == 'true' }}
         run: cargo install --locked cargo-deb cargo-generate-rpm
 
       - name: Install package verification tools
-        if: ${{ steps.commit.outputs.released == 'true' }}
+        if: ${{ steps.release-plz.outputs.released == 'true' }}
         run: sudo apt-get update && sudo apt-get install -y rpm
 
       - name: Build release binary
-        if: ${{ steps.commit.outputs.released == 'true' }}
+        if: ${{ steps.release-plz.outputs.released == 'true' }}
         run: cargo build --release --locked --target "${RUST_TARGET}"
 
       - name: Assemble binary distribution
-        if: ${{ steps.commit.outputs.released == 'true' }}
+        if: ${{ steps.release-plz.outputs.released == 'true' }}
         env:
-          VERSION: ${{ steps.commit.outputs.version }}
+          VERSION: ${{ steps.release-plz.outputs.version }}
         run: |
           DIST_ROOT="target/dist/plasma-drop-${VERSION}-${RUST_TARGET}"
           mkdir -p "${DIST_ROOT}/bin" "${DIST_ROOT}/share/systemd/user" "${DIST_ROOT}/share/plasma-drop/examples"
@@ -120,33 +125,33 @@ jobs:
           tar -C target/dist -czf "target/dist/plasma-drop-${VERSION}-${RUST_TARGET}.tar.gz" "plasma-drop-${VERSION}-${RUST_TARGET}"
 
       - name: Build deb package
-        if: ${{ steps.commit.outputs.released == 'true' }}
-        run: cargo deb --no-build --target "${RUST_TARGET}" --output "target/debian/plasma-drop_${{ steps.commit.outputs.version }}_amd64.deb"
+        if: ${{ steps.release-plz.outputs.released == 'true' }}
+        run: cargo deb --no-build --target "${RUST_TARGET}" --output "target/debian/plasma-drop_${{ steps.release-plz.outputs.version }}_amd64.deb"
 
       - name: Build rpm package
-        if: ${{ steps.commit.outputs.released == 'true' }}
-        run: cargo generate-rpm --target "${RUST_TARGET}" --output "target/generate-rpm/plasma-drop-${{ steps.commit.outputs.version }}-1.x86_64.rpm"
+        if: ${{ steps.release-plz.outputs.released == 'true' }}
+        run: cargo generate-rpm --target "${RUST_TARGET}" --output "target/generate-rpm/plasma-drop-${{ steps.release-plz.outputs.version }}-1.x86_64.rpm"
 
       - name: Verify binary archive contents
-        if: ${{ steps.commit.outputs.released == 'true' }}
+        if: ${{ steps.release-plz.outputs.released == 'true' }}
         run: |
-          tar -tzf "target/dist/plasma-drop-${{ steps.commit.outputs.version }}-${RUST_TARGET}.tar.gz" | grep -E 'install-user.sh|bin/plasma-drop|share/systemd/user/plasma-drop.service|share/plasma-drop/examples/config.toml'
+          tar -tzf "target/dist/plasma-drop-${{ steps.release-plz.outputs.version }}-${RUST_TARGET}.tar.gz" | grep -E 'install-user.sh|bin/plasma-drop|share/systemd/user/plasma-drop.service|share/plasma-drop/examples/config.toml'
 
       - name: Verify deb package contents
-        if: ${{ steps.commit.outputs.released == 'true' }}
+        if: ${{ steps.release-plz.outputs.released == 'true' }}
         run: |
-          dpkg-deb --contents "target/debian/plasma-drop_${{ steps.commit.outputs.version }}_amd64.deb" | grep -E 'usr/bin/plasma-drop|usr/lib/systemd/user/plasma-drop.service|usr/share/plasma-drop/examples/config.toml'
+          dpkg-deb --contents "target/debian/plasma-drop_${{ steps.release-plz.outputs.version }}_amd64.deb" | grep -E 'usr/bin/plasma-drop|usr/lib/systemd/user/plasma-drop.service|usr/share/plasma-drop/examples/config.toml'
 
       - name: Verify rpm package contents
-        if: ${{ steps.commit.outputs.released == 'true' }}
+        if: ${{ steps.release-plz.outputs.released == 'true' }}
         run: |
-          rpm -qlp "target/generate-rpm/plasma-drop-${{ steps.commit.outputs.version }}-1.x86_64.rpm" | grep -E '/usr/bin/plasma-drop|/usr/lib/systemd/user/plasma-drop.service|/usr/share/plasma-drop/examples/config.toml'
+          rpm -qlp "target/generate-rpm/plasma-drop-${{ steps.release-plz.outputs.version }}-1.x86_64.rpm" | grep -E '/usr/bin/plasma-drop|/usr/lib/systemd/user/plasma-drop.service|/usr/share/plasma-drop/examples/config.toml'
 
       - name: Stage release artifacts
-        if: ${{ steps.commit.outputs.released == 'true' }}
+        if: ${{ steps.release-plz.outputs.released == 'true' }}
         id: stage
         env:
-          VERSION: ${{ steps.commit.outputs.version }}
+          VERSION: ${{ steps.release-plz.outputs.version }}
         run: |
           STAGE="target/release-assets"
           mkdir -p "${STAGE}"
@@ -156,23 +161,23 @@ jobs:
           ( cd "${STAGE}" && sha256sum -- * > SHA256SUMS )
 
       - name: Attest build provenance
-        if: ${{ steps.commit.outputs.released == 'true' }}
+        if: ${{ steps.release-plz.outputs.released == 'true' }}
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: |
-            target/release-assets/plasma-drop-${{ steps.commit.outputs.version }}-${{ env.RUST_TARGET }}.tar.gz
-            target/release-assets/plasma-drop_${{ steps.commit.outputs.version }}_amd64.deb
-            target/release-assets/plasma-drop-${{ steps.commit.outputs.version }}-1.x86_64.rpm
+            target/release-assets/plasma-drop-${{ steps.release-plz.outputs.version }}-${{ env.RUST_TARGET }}.tar.gz
+            target/release-assets/plasma-drop_${{ steps.release-plz.outputs.version }}_amd64.deb
+            target/release-assets/plasma-drop-${{ steps.release-plz.outputs.version }}-1.x86_64.rpm
 
       - name: Publish release assets
-        if: ${{ steps.commit.outputs.released == 'true' }}
+        if: ${{ steps.release-plz.outputs.released == 'true' }}
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.commit.outputs.tag_name }}
+          tag_name: ${{ steps.release-plz.outputs.tag_name }}
           append_body: true
           fail_on_unmatched_files: true
           files: |
-            target/release-assets/plasma-drop-${{ steps.commit.outputs.version }}-${{ env.RUST_TARGET }}.tar.gz
-            target/release-assets/plasma-drop_${{ steps.commit.outputs.version }}_amd64.deb
-            target/release-assets/plasma-drop-${{ steps.commit.outputs.version }}-1.x86_64.rpm
+            target/release-assets/plasma-drop-${{ steps.release-plz.outputs.version }}-${{ env.RUST_TARGET }}.tar.gz
+            target/release-assets/plasma-drop_${{ steps.release-plz.outputs.version }}_amd64.deb
+            target/release-assets/plasma-drop-${{ steps.release-plz.outputs.version }}-1.x86_64.rpm
             target/release-assets/SHA256SUMS
