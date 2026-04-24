@@ -11,8 +11,11 @@ This project does not target X11 or non-KWin compositors.
 
 ## Build
 
+Build with either local task runner:
+
 ```bash
-cargo build
+make build
+mise run build
 ```
 
 ## Install with `cargo`
@@ -115,6 +118,14 @@ You can override that with:
 
 ```bash
 cargo run -- --config /absolute/path/to/config.toml
+```
+
+For development builds, use either task runner before launching the binary:
+
+```bash
+make build
+mise run build
+./target/debug/plasma-drop --config /absolute/path/to/config.toml
 ```
 
 ## Typical Session Flow

@@ -1,10 +1,15 @@
+.PHONY: build fmt fmt-check lint clippy test doc check
+
+build:
+	cargo build
+
 fmt:
 	cargo fmt --all
 
 fmt-check:
 	cargo fmt --all -- --check
 
-clippy:
+lint clippy:
 	cargo clippy --all-targets --all-features -- -D warnings
 
 test:

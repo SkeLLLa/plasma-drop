@@ -24,37 +24,32 @@ If you need a GUI, a Windows version, or more configuration options, use that ap
 
 ## Quality checks
 
-Run the full local quality suite with:
+Run the full local quality suite with either task runner:
 
 ```bash
 make check
-```
-
-Available targets:
-
-- `make fmt`
-- `make fmt-check`
-- `make clippy`
-- `make test`
-- `make doc`
-
-If you use `mise` for the development environment, install the pinned toolchain and run the
-same checks with:
-
-```bash
-mise install
 mise run check
 ```
 
-Other useful `mise` tasks:
+Install pinned development tools first when using `mise`:
 
 ```bash
-mise run build
-mise run fmt
-mise run lint
-mise run test
-mise run doc
+mise install
 ```
+
+Common project scripts:
+
+| Task | Make | mise |
+| --- | --- | --- |
+| Build | `make build` | `mise run build` |
+| Format | `make fmt` | `mise run fmt` |
+| Check format | `make fmt-check` | `mise run fmt-check` |
+| Lint | `make lint` or `make clippy` | `mise run lint` or `mise run clippy` |
+| Test | `make test` | `mise run test` |
+| Docs | `make doc` | `mise run doc` |
+| Full check | `make check` | `mise run check` |
+
+Both runners delegate to the same Cargo commands.
 
 ## Distribution
 
