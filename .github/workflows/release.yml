@@ -39,6 +39,7 @@ jobs:
       id-token: write
       attestations: write
       pull-requests: read
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -174,14 +175,14 @@ jobs:
 
   release-pr:
     name: Release PR
-    needs: quality
+    needs: [quality, release]
     if: ${{ github.repository_owner == 'SkeLLLa' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
       pull-requests: write
     concurrency:
-      group: release-pr-${{ github.ref }}
+      group: release-${{ github.ref }}
       cancel-in-progress: false
     steps:
       - name: Checkout repository
