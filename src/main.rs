@@ -24,7 +24,7 @@ use anyhow::{Context, Result};
 use app_registry::{AppRegistry, ManagedApp};
 use clap::Parser;
 use cli::{Cli, Command};
-use config::{default_config_path, Config};
+use config::{Config, default_config_path};
 use screen::parse_support_information;
 use std::fs;
 use std::path::Path;
@@ -33,9 +33,9 @@ use toggle::ToggleService;
 use tokio::sync::Mutex;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
+use wm::HOTKEY_PREFIX;
 use wm::kwin::client::KWinClient;
 use wm::kwin::script::ensure_script_file;
-use wm::HOTKEY_PREFIX;
 
 #[tokio::main]
 async fn main() -> Result<()> {

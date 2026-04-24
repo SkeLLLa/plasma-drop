@@ -4,7 +4,7 @@ pub mod types;
 use anyhow::Result;
 use async_trait::async_trait;
 
-pub use types::{find_best_match, FrameGeometry, ManagedWindow};
+pub use types::{FrameGeometry, ManagedWindow, find_best_match};
 
 pub const HOTKEY_PREFIX: &str = "plasma_drop_hotkey_";
 

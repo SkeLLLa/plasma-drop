@@ -1,6 +1,6 @@
 use crate::config::{PlacementConfig, PlacementMetric, PlacementPosition};
 use crate::wm::FrameGeometry;
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use regex::Regex;
 use std::sync::OnceLock;
 
@@ -161,7 +161,7 @@ pub fn parse_support_information(text: &str) -> Result<Vec<ScreenInfo>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_support_information, ScreenInfo};
+    use super::{ScreenInfo, parse_support_information};
     use crate::config::{PlacementConfig, PlacementMetric, PlacementPosition};
     use crate::wm::FrameGeometry;
 

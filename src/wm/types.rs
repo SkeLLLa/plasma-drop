@@ -64,7 +64,7 @@ pub fn matches_window(window: &ManagedWindow, app: &AppConfig) -> bool {
     let title_ok = app
         .window_title
         .as_ref()
-        .map_or(true, |pattern| pattern.is_match(&window.caption));
+        .is_none_or(|pattern| pattern.is_match(&window.caption));
 
     process_ok && title_ok
 }
@@ -79,7 +79,7 @@ fn normalize_filename_matcher(filename: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{find_best_match, matches_window, FrameGeometry, ManagedWindow};
+    use super::{FrameGeometry, ManagedWindow, find_best_match, matches_window};
     use crate::config::{AnimationConfig, AppConfig, AttachMode, PlacementConfig};
     use crate::hotkey::Hotkey;
     use regex::Regex;

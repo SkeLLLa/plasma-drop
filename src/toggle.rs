@@ -2,8 +2,8 @@ use crate::animation::{TransitionPhase, TransitionPlan, WindowState};
 use crate::app_registry::AppRegistry;
 use crate::config::{AppConfig, AttachMode};
 use crate::screen::ScreenInfo;
-use crate::wm::{find_best_match, FrameGeometry, ManagedWindow, WindowManager};
-use anyhow::{bail, Context, Result};
+use crate::wm::{FrameGeometry, ManagedWindow, WindowManager, find_best_match};
+use anyhow::{Context, Result, bail};
 use std::collections::HashMap;
 use std::process::Stdio;
 use std::sync::Arc;
@@ -439,7 +439,7 @@ fn should_ignore_shortcut(
 
 #[cfg(test)]
 mod tests {
-    use super::{should_ignore_shortcut, ToggleService, HOTKEY_DEBOUNCE_WINDOW};
+    use super::{HOTKEY_DEBOUNCE_WINDOW, ToggleService, should_ignore_shortcut};
     use crate::app_registry::{AppRegistry, ManagedApp};
     use crate::config::{
         AnimationConfig, AppConfig, AttachMode, PlacementConfig, PlacementMetric, PlacementPosition,
@@ -674,9 +674,11 @@ mod tests {
             .cloned()
             .collect();
         assert!(move_lines.iter().any(|line| line.contains(":0:0:960:1080")));
-        assert!(move_lines
-            .iter()
-            .any(|line| line.contains(":960:0:960:1080")));
+        assert!(
+            move_lines
+                .iter()
+                .any(|line| line.contains(":960:0:960:1080"))
+        );
     }
 
     #[tokio::test]
@@ -857,9 +859,10 @@ mod tests {
         );
 
         let err = service.toggle_app("terminal").await.unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("no existing window matched app 'terminal'"));
+        assert!(
+            err.to_string()
+                .contains("no existing window matched app 'terminal'")
+        );
 
         let registry = registry.lock().await;
         let app = registry.managed_app("terminal").unwrap();

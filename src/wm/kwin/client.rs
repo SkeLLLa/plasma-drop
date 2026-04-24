@@ -5,16 +5,16 @@ use crate::wm::kwin::types::{
     CommandEnvelope, ResponseEnvelope, SupportInformationResponse, WindowListResponse,
     WindowResponse,
 };
-use crate::wm::{FrameGeometry, ManagedWindow, WindowManager, HOTKEY_PREFIX};
-use anyhow::{anyhow, bail, Context, Result};
+use crate::wm::{FrameGeometry, HOTKEY_PREFIX, ManagedWindow, WindowManager};
+use anyhow::{Context, Result, anyhow, bail};
 use async_trait::async_trait;
 use serde::de::DeserializeOwned;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::{mpsc, oneshot, Mutex, Notify};
+use tokio::sync::{Mutex, Notify, mpsc, oneshot};
 use tracing::{debug, warn};
 use uuid::Uuid;
 use zbus::{Connection, ConnectionBuilder};
