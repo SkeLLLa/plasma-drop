@@ -6,6 +6,7 @@
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](COPYING)
 
 `plasma-drop` is a KDE Plasma 6 dropdown app launcher built around KWin scripting and global shortcuts.
+Think Yakuake-style dropdown behavior, but for any app you configure.
 
 It is heavily inspired by [windows-terminal-quake](https://github.com/flyingpie/windows-terminal-quake).
 If you need a GUI, a Windows version, or more configuration options, use that app.
@@ -159,3 +160,12 @@ For end users who just want to run `plasma-drop`, prefer one of:
 - the GitHub release `tar.gz`
 - the GitHub release `deb`
 - the GitHub release `rpm`
+
+## Support
+
+If `plasma-drop` is useful to you and you want to say thanks, please consider supporting Ukrainian
+defenders instead of sending money to the author.
+
+[![Come Back Alive](https://img.shields.io/badge/Donate-%F0%9F%87%BA%F0%9F%87%A6%20Come%20Back%20Alive-F5F5F5?labelColor=FFD700&color=F5F5F5)](https://savelife.in.ua/en/donate-en/)
+[![Sternenko Fund](https://img.shields.io/badge/Donate-%F0%9F%87%BA%F0%9F%87%A6%20Sternenko%20Fund-F5F5F5?labelColor=FFD700&color=F5F5F5)](https://www.sternenkofund.org/en/donate)
+[![Prytula Foundation](https://img.shields.io/badge/Donate-%F0%9F%87%BA%F0%9F%87%A6%20Prytula%20Foundation-F5F5F5?labelColor=FFD700&color=F5F5F5)](https://prytulafoundation.org/en/donation)
