@@ -57,6 +57,7 @@ Release CI now targets three Linux artifact types:
 - `tar.gz` binary bundle with `install-user.sh`
 - `deb`
 - `rpm`
+- GitHub Pages RPM/APT repositories
 
 Each artifact ships the `plasma-drop` binary, a user systemd unit, and an example config for a
 quicker first run. The detailed install layout and CI plan live in
@@ -76,6 +77,8 @@ The repo release flow is:
 3. The workflow commits that release bump back to `master`
 4. `release-plz release` publishes the crate, creates the tag, and creates the GitHub release
 5. The same workflow attaches the `tar.gz`, `deb`, and `rpm` assets to that release
+6. The workflow also attaches `SHA256SUMS` and one `.sha256` checksum sidecar per artifact
+7. The workflow publishes unsigned RPM/APT repository metadata to GitHub Pages
 
 Crates.io publishing uses trusted publishing through GitHub Actions OIDC. After the first manual
 crate publish, configure crates.io to trust `SkeLLLa/plasma-drop` and workflow `release.yml`;

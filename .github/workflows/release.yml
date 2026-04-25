@@ -31,6 +31,10 @@ jobs:
     needs: quality
     if: ${{ github.repository_owner == 'SkeLLLa' && !contains(github.event.head_commit.message, '[skip ci]') }}
     runs-on: ubuntu-latest
+    outputs:
+      released: ${{ steps.release-plz.outputs.released }}
+      version: ${{ steps.release-plz.outputs.version }}
+      tag_name: ${{ steps.release-plz.outputs.tag_name }}
     concurrency:
       group: release-${{ github.ref }}
       cancel-in-progress: false
@@ -159,7 +163,18 @@ jobs:
           cp "target/dist/plasma-drop-${VERSION}-${RUST_TARGET}.tar.gz" "${STAGE}/"
           cp "target/debian/plasma-drop_${VERSION}_amd64.deb" "${STAGE}/"
           cp "target/generate-rpm/plasma-drop-${VERSION}-1.x86_64.rpm" "${STAGE}/"
-          ( cd "${STAGE}" && sha256sum -- * > SHA256SUMS )
+          (
+            cd "${STAGE}"
+            assets=(
+              "plasma-drop-${VERSION}-${RUST_TARGET}.tar.gz"
+              "plasma-drop_${VERSION}_amd64.deb"
+              "plasma-drop-${VERSION}-1.x86_64.rpm"
+            )
+            for asset in "${assets[@]}"; do
+              sha256sum -- "${asset}" > "${asset}.sha256"
+            done
+            sha256sum -- "${assets[@]}" > SHA256SUMS
+          )
 
       - name: Attest build provenance
         if: ${{ steps.release-plz.outputs.released == 'true' }}
@@ -181,4 +196,193 @@ jobs:
             target/release-assets/plasma-drop-${{ steps.release-plz.outputs.version }}-${{ env.RUST_TARGET }}.tar.gz
             target/release-assets/plasma-drop_${{ steps.release-plz.outputs.version }}_amd64.deb
             target/release-assets/plasma-drop-${{ steps.release-plz.outputs.version }}-1.x86_64.rpm
+            target/release-assets/plasma-drop-${{ steps.release-plz.outputs.version }}-${{ env.RUST_TARGET }}.tar.gz.sha256
+            target/release-assets/plasma-drop_${{ steps.release-plz.outputs.version }}_amd64.deb.sha256
+            target/release-assets/plasma-drop-${{ steps.release-plz.outputs.version }}-1.x86_64.rpm.sha256
             target/release-assets/SHA256SUMS
+
+      - name: Upload package repository inputs
+        if: ${{ steps.release-plz.outputs.released == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-repository-inputs
+          retention-days: 1
+          path: |
+            target/release-assets/plasma-drop_${{ steps.release-plz.outputs.version }}_amd64.deb
+            target/release-assets/plasma-drop-${{ steps.release-plz.outputs.version }}-1.x86_64.rpm
+
+  package-repositories:
+    name: Publish package repositories
+    needs: release
+    if: ${{ needs.release.outputs.released == 'true' }}
+    runs-on: ubuntu-latest
+    concurrency:
+      group: package-repositories
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Download current package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: package-repository-inputs
+          path: target/release-assets
+
+      - name: Install repository tools
+        run: sudo apt-get update && sudo apt-get install -y createrepo-c dpkg-dev
+
+      - name: Build GitHub Pages package repositories
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ needs.release.outputs.tag_name }}
+          VERSION: ${{ needs.release.outputs.version }}
+          PAGES_URL: https://skellla.github.io/plasma-drop
+        run: |
+          set -euo pipefail
+
+          repo_root="public"
+          rpm_dir="${repo_root}/rpm/x86_64"
+          deb_root="${repo_root}/deb"
+          deb_pool="${deb_root}/pool/main/p/plasma-drop"
+          deb_binary="${deb_root}/dists/stable/main/binary-amd64"
+          previous_assets="${RUNNER_TEMP}/previous-package-assets"
+
+          mkdir -p "${rpm_dir}" "${deb_pool}" "${deb_binary}" "${previous_assets}"
+
+          mapfile -t previous_tags < <(
+            gh release list \
+              --repo "${GITHUB_REPOSITORY}" \
+              --limit 20 \
+              --json tagName,isDraft,isPrerelease \
+              --jq '.[] | select(.isDraft == false and .isPrerelease == false) | .tagName' \
+              | grep -vxF "${TAG_NAME}" \
+              | head -9 || true
+          )
+
+          for tag in "${previous_tags[@]}"; do
+            tag_dir="${previous_assets}/${tag}"
+            mkdir -p "${tag_dir}"
+            gh release download "${tag}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --pattern 'plasma-drop-*-1.x86_64.rpm' \
+              --pattern 'plasma-drop_*_amd64.deb' \
+              --dir "${tag_dir}" \
+              --clobber || true
+          done
+
+          find "${previous_assets}" -type f -name '*.rpm' -exec cp -n {} "${rpm_dir}/" \;
+          find "${previous_assets}" -type f -name '*.deb' -exec cp -n {} "${deb_pool}/" \;
+          cp "target/release-assets/plasma-drop-${VERSION}-1.x86_64.rpm" "${rpm_dir}/"
+          cp "target/release-assets/plasma-drop_${VERSION}_amd64.deb" "${deb_pool}/"
+
+          createrepo_c --update --compatibility "${rpm_dir}"
+
+          (
+            cd "${deb_root}"
+            dpkg-scanpackages --multiversion --arch amd64 pool /dev/null > dists/stable/main/binary-amd64/Packages
+            gzip -9 -kf dists/stable/main/binary-amd64/Packages
+          )
+
+          write_hash_block() {
+            local label="$1"
+            shift
+            echo "${label}:"
+            for file in "$@"; do
+              local hash
+              local size
+              case "${label}" in
+                MD5Sum) hash="$(md5sum "${file}" | awk '{ print $1 }')" ;;
+                SHA1) hash="$(sha1sum "${file}" | awk '{ print $1 }')" ;;
+                SHA256) hash="$(sha256sum "${file}" | awk '{ print $1 }')" ;;
+              esac
+              size="$(wc -c < "${file}")"
+              printf ' %s %16s %s\n' "${hash}" "${size}" "${file}"
+            done
+          }
+
+          (
+            cd "${deb_root}/dists/stable"
+            {
+              echo "Origin: plasma-drop"
+              echo "Label: plasma-drop"
+              echo "Suite: stable"
+              echo "Codename: stable"
+              echo "Date: $(date -Ru)"
+              echo "Architectures: amd64"
+              echo "Components: main"
+              echo "Description: plasma-drop APT repository"
+              write_hash_block MD5Sum main/binary-amd64/Packages main/binary-amd64/Packages.gz
+              write_hash_block SHA1 main/binary-amd64/Packages main/binary-amd64/Packages.gz
+              write_hash_block SHA256 main/binary-amd64/Packages main/binary-amd64/Packages.gz
+            } > Release
+          )
+
+          cat > "${repo_root}/rpm/plasma-drop.repo" <<EOF
+          [plasma-drop]
+          name=plasma-drop
+          baseurl=${PAGES_URL}/rpm/x86_64
+          enabled=1
+          gpgcheck=0
+          repo_gpgcheck=0
+          EOF
+
+          cat > "${deb_root}/plasma-drop.list" <<EOF
+          deb [trusted=yes] ${PAGES_URL}/deb stable main
+          EOF
+
+          cat > "${repo_root}/.nojekyll" <<EOF
+          EOF
+
+          cat > "${repo_root}/index.html" <<EOF
+          <!doctype html>
+          <html lang="en">
+            <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1">
+              <title>plasma-drop package repositories</title>
+            </head>
+            <body>
+              <h1>plasma-drop package repositories</h1>
+              <h2>RPM / DNF / YUM</h2>
+              <pre>sudo tee /etc/yum.repos.d/plasma-drop.repo &gt;/dev/null &lt;&lt;'REPO'
+          [plasma-drop]
+          name=plasma-drop
+          baseurl=${PAGES_URL}/rpm/x86_64
+          enabled=1
+          gpgcheck=0
+          repo_gpgcheck=0
+          REPO
+          sudo dnf install plasma-drop</pre>
+              <h2>APT</h2>
+              <pre>echo 'deb [trusted=yes] ${PAGES_URL}/deb stable main' | sudo tee /etc/apt/sources.list.d/plasma-drop.list
+          sudo apt update
+          sudo apt install plasma-drop</pre>
+              <p>These repositories are unsigned. GitHub Releases remain the long-term artifact archive.</p>
+            </body>
+          </html>
+          EOF
+
+      - name: Verify generated package repositories
+        run: |
+          set -euo pipefail
+          test -f public/rpm/x86_64/repodata/repomd.xml
+          test -f public/deb/dists/stable/Release
+          test -f public/deb/dists/stable/main/binary-amd64/Packages.gz
+          gzip -cd public/deb/dists/stable/main/binary-amd64/Packages.gz | grep -q '^Package: plasma-drop$'
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload GitHub Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: public
+
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -4,6 +4,7 @@
 
 - Produce a standalone binary archive for users without distro packaging.
 - Produce native `deb` and `rpm` packages for system-wide installation.
+- Publish static RPM and APT repositories through GitHub Pages.
 - Support `cargo install` without depending on separately installed resource files.
 - Ship the files needed for a first launch: binary, user systemd unit, and example config.
 
@@ -40,6 +41,17 @@ Native packages install:
 The packaged service points at `/usr/bin/plasma-drop` and expects the active user config at
 `~/.config/plasma-drop/config.toml`.
 
+### GitHub Pages repositories
+
+Release CI publishes unsigned package repositories at:
+
+- `https://skellla.github.io/plasma-drop/rpm/x86_64`
+- `https://skellla.github.io/plasma-drop/deb`
+
+The RPM repository is generated with `createrepo_c --compatibility`. The APT repository uses a
+`stable` suite and `main` component generated from the published `.deb` packages. GitHub Releases
+remain the long-term artifact archive; Pages keeps a bounded recent package set.
+
 ### `cargo install`
 
 `cargo install` only places the binary in Cargo's bin directory, so the starter assets are
@@ -70,7 +82,10 @@ The release flow should:
 7. It builds `deb` via `cargo-deb`.
 8. It builds `rpm` via `cargo-generate-rpm`.
 9. It verifies package contents before upload.
-10. It attaches the `tar.gz`, `deb`, and `rpm` files to the GitHub release.
+10. It generates a combined `SHA256SUMS` file and one `.sha256` sidecar per artifact.
+11. It attaches the `tar.gz`, `deb`, `rpm`, `SHA256SUMS`, and per-artifact `.sha256` files to
+    the GitHub release.
+12. It builds and deploys RPM/APT repository metadata to GitHub Pages.
 
 The release workflow uses the default `GITHUB_TOKEN` for repository operations. It does not depend
 on a PAT to trigger a second workflow.
@@ -138,6 +153,15 @@ cd plasma-drop-<version>-x86_64-unknown-linux-gnu
 ./install-user.sh
 ```
 
+To verify a downloaded artifact before installing it, download the matching `.sha256` sidecar and
+run:
+
+```bash
+sha256sum -c plasma-drop-<version>-x86_64-unknown-linux-gnu.tar.gz.sha256
+```
+
+The release also includes `SHA256SUMS` for checking all downloaded artifacts at once.
+
 ### Native package
 
 1. Install the package with the distro package manager.
@@ -168,4 +192,26 @@ Without `systemd --user`:
 
 ```bash
 plasma-drop --config ~/.config/plasma-drop/config.toml
+```
+
+### RPM repository
+
+```bash
+sudo tee /etc/yum.repos.d/plasma-drop.repo >/dev/null <<'EOF'
+[plasma-drop]
+name=plasma-drop
+baseurl=https://skellla.github.io/plasma-drop/rpm/x86_64
+enabled=1
+gpgcheck=0
+repo_gpgcheck=0
+EOF
+sudo dnf install plasma-drop
+```
+
+### APT repository
+
+```bash
+echo 'deb [trusted=yes] https://skellla.github.io/plasma-drop/deb stable main' | sudo tee /etc/apt/sources.list.d/plasma-drop.list
+sudo apt update
+sudo apt install plasma-drop
 ```
