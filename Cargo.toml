@@ -84,6 +84,8 @@ assets = [
   ["packaging/systemd/plasma-drop.packaged.service", "usr/lib/systemd/user/plasma-drop.service", "644"],
   ["resources/example-config.toml", "usr/share/plasma-drop/examples/config.toml", "644"],
   ["README.md", "usr/share/doc/plasma-drop/README.md", "644"],
+  ["resources/icons/plasma-drop-icon.svg", "usr/share/doc/plasma-drop/resources/icons/plasma-drop-icon.svg", "644"],
+  ["resources/icons/plasma-drop-icon.png", "usr/share/doc/plasma-drop/resources/icons/plasma-drop-icon.png", "644"],
   ["COPYING", "usr/share/doc/plasma-drop/COPYING", "644"],
 ]
 
@@ -95,5 +97,7 @@ assets = [
   { source = "packaging/systemd/plasma-drop.packaged.service", dest = "/usr/lib/systemd/user/plasma-drop.service", mode = "644", doc = false },
   { source = "resources/example-config.toml", dest = "/usr/share/plasma-drop/examples/config.toml", mode = "644", doc = true },
   { source = "README.md", dest = "/usr/share/doc/plasma-drop/README.md", mode = "644", doc = true },
+  { source = "resources/icons/plasma-drop-icon.svg", dest = "/usr/share/doc/plasma-drop/resources/icons/plasma-drop-icon.svg", mode = "644", doc = true },
+  { source = "resources/icons/plasma-drop-icon.png", dest = "/usr/share/doc/plasma-drop/resources/icons/plasma-drop-icon.png", mode = "644", doc = true },
   { source = "COPYING", dest = "/usr/share/doc/plasma-drop/COPYING", mode = "644", doc = true },
 ]

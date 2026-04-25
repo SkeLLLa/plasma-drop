@@ -21,6 +21,8 @@ The release archive is intended for user-local installation and contains:
 - `bin/plasma-drop`
 - `share/systemd/user/plasma-drop.service`
 - `share/plasma-drop/examples/config.toml`
+- `resources/icons/plasma-drop-icon.svg`
+- `resources/icons/plasma-drop-icon.png`
 - `install-user.sh`
 - `README.md`
 - license files
@@ -37,6 +39,8 @@ Native packages install:
 - `/usr/lib/systemd/user/plasma-drop.service`
 - `/usr/share/plasma-drop/examples/config.toml`
 - `/usr/share/doc/plasma-drop/README.md`
+- `/usr/share/doc/plasma-drop/resources/icons/plasma-drop-icon.svg`
+- `/usr/share/doc/plasma-drop/resources/icons/plasma-drop-icon.png`
 
 The packaged service points at `/usr/bin/plasma-drop` and expects the active user config at
 `~/.config/plasma-drop/config.toml`.

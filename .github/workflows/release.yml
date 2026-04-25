@@ -121,11 +121,13 @@ jobs:
           VERSION: ${{ steps.release-plz.outputs.version }}
         run: |
           DIST_ROOT="target/dist/plasma-drop-${VERSION}-${RUST_TARGET}"
-          mkdir -p "${DIST_ROOT}/bin" "${DIST_ROOT}/share/systemd/user" "${DIST_ROOT}/share/plasma-drop/examples"
+          mkdir -p "${DIST_ROOT}/bin" "${DIST_ROOT}/share/systemd/user" "${DIST_ROOT}/share/plasma-drop/examples" "${DIST_ROOT}/resources/icons"
           install -m 755 "target/${RUST_TARGET}/release/plasma-drop" "${DIST_ROOT}/bin/plasma-drop"
           install -m 755 packaging/dist/install-user.sh "${DIST_ROOT}/install-user.sh"
           install -m 644 packaging/systemd/plasma-drop.packaged.service "${DIST_ROOT}/share/systemd/user/plasma-drop.service"
           install -m 644 resources/example-config.toml "${DIST_ROOT}/share/plasma-drop/examples/config.toml"
+          install -m 644 resources/icons/plasma-drop-icon.svg "${DIST_ROOT}/resources/icons/plasma-drop-icon.svg"
+          install -m 644 resources/icons/plasma-drop-icon.png "${DIST_ROOT}/resources/icons/plasma-drop-icon.png"
           install -m 644 README.md COPYING "${DIST_ROOT}/"
           tar -C target/dist -czf "target/dist/plasma-drop-${VERSION}-${RUST_TARGET}.tar.gz" "plasma-drop-${VERSION}-${RUST_TARGET}"
 
@@ -140,17 +142,46 @@ jobs:
       - name: Verify binary archive contents
         if: ${{ steps.release-plz.outputs.released == 'true' }}
         run: |
-          tar -tzf "target/dist/plasma-drop-${{ steps.release-plz.outputs.version }}-${RUST_TARGET}.tar.gz" | grep -E 'install-user.sh|bin/plasma-drop|share/systemd/user/plasma-drop.service|share/plasma-drop/examples/config.toml'
+          archive="target/dist/plasma-drop-${{ steps.release-plz.outputs.version }}-${RUST_TARGET}.tar.gz"
+          root="plasma-drop-${{ steps.release-plz.outputs.version }}-${RUST_TARGET}"
+          for path in \
+            "${root}/install-user.sh" \
+            "${root}/bin/plasma-drop" \
+            "${root}/share/systemd/user/plasma-drop.service" \
+            "${root}/share/plasma-drop/examples/config.toml" \
+            "${root}/README.md" \
+            "${root}/resources/icons/plasma-drop-icon.svg" \
+            "${root}/resources/icons/plasma-drop-icon.png"; do
+            tar -tzf "${archive}" "${path}" >/dev/null
+          done
 
       - name: Verify deb package contents
         if: ${{ steps.release-plz.outputs.released == 'true' }}
         run: |
-          dpkg-deb --contents "target/debian/plasma-drop_${{ steps.release-plz.outputs.version }}_amd64.deb" | grep -E 'usr/bin/plasma-drop|usr/lib/systemd/user/plasma-drop.service|usr/share/plasma-drop/examples/config.toml'
+          package="target/debian/plasma-drop_${{ steps.release-plz.outputs.version }}_amd64.deb"
+          for path in \
+            ./usr/bin/plasma-drop \
+            ./usr/lib/systemd/user/plasma-drop.service \
+            ./usr/share/plasma-drop/examples/config.toml \
+            ./usr/share/doc/plasma-drop/README.md \
+            ./usr/share/doc/plasma-drop/resources/icons/plasma-drop-icon.svg \
+            ./usr/share/doc/plasma-drop/resources/icons/plasma-drop-icon.png; do
+            dpkg-deb --contents "${package}" | awk '{print $6}' | grep -Fx "${path}" >/dev/null
+          done
 
       - name: Verify rpm package contents
         if: ${{ steps.release-plz.outputs.released == 'true' }}
         run: |
-          rpm -qlp "target/generate-rpm/plasma-drop-${{ steps.release-plz.outputs.version }}-1.x86_64.rpm" | grep -E '/usr/bin/plasma-drop|/usr/lib/systemd/user/plasma-drop.service|/usr/share/plasma-drop/examples/config.toml'
+          package="target/generate-rpm/plasma-drop-${{ steps.release-plz.outputs.version }}-1.x86_64.rpm"
+          for path in \
+            /usr/bin/plasma-drop \
+            /usr/lib/systemd/user/plasma-drop.service \
+            /usr/share/plasma-drop/examples/config.toml \
+            /usr/share/doc/plasma-drop/README.md \
+            /usr/share/doc/plasma-drop/resources/icons/plasma-drop-icon.svg \
+            /usr/share/doc/plasma-drop/resources/icons/plasma-drop-icon.png; do
+            rpm -qlp "${package}" | grep -Fx "${path}" >/dev/null
+          done
 
       - name: Stage release artifacts
         if: ${{ steps.release-plz.outputs.released == 'true' }}

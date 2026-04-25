@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="title desc">
+  <title id="title">plasma-drop GitHub social preview</title>
+  <desc id="desc">A social preview banner for plasma-drop, featuring a KDE-style terminal raindrop icon and project description.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1280" y2="640" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#151c28"/>
+      <stop offset=".54" stop-color="#101722"/>
+      <stop offset="1" stop-color="#07101c"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="88" y1="82" x2="1192" y2="558" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2f3c4e"/>
+      <stop offset="1" stop-color="#111a27"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="150" y1="124" x2="1070" y2="506" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7bd8ff"/>
+      <stop offset=".5" stop-color="#2aa4f4"/>
+      <stop offset="1" stop-color="#78ffd6"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="356" cy="316" r="360" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#31c6ff" stop-opacity=".42"/>
+      <stop offset=".45" stop-color="#31c6ff" stop-opacity=".13"/>
+      <stop offset="1" stop-color="#31c6ff" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="soft-shadow" x="-10%" y="-20%" width="120%" height="140%" color-interpolation-filters="sRGB">
+      <feOffset in="SourceAlpha" dx="0" dy="18" result="offset"/>
+      <feGaussianBlur in="offset" stdDeviation="24" result="blur"/>
+      <feFlood flood-color="#000000" flood-opacity=".38" result="color"/>
+      <feComposite in="color" in2="blur" operator="in" result="shadow"/>
+      <feMerge>
+        <feMergeNode in="shadow"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <rect width="1280" height="640" fill="url(#background)"/>
+  <circle cx="350" cy="320" r="360" fill="url(#glow)"/>
+  <path d="M0 514c140-42 262-46 382-15 128 33 236 70 384 34 118-29 235-81 514-28v135H0z" fill="#0b6ca8" opacity=".13"/>
+  <path d="M0 552c210-30 354-8 496 22 162 34 312 46 500-14 105-34 196-45 284-27v107H0z" fill="#40e0c0" opacity=".09"/>
+
+  <rect x="88" y="82" width="1104" height="476" rx="22" fill="url(#panel)" filter="url(#soft-shadow)"/>
+  <rect x="88" y="82" width="1104" height="68" rx="22" fill="#38465a"/>
+  <path d="M88 128h1104v22H88z" fill="#38465a"/>
+  <path d="M88 150h1104" stroke="#58cfff" stroke-width="4" stroke-opacity=".7"/>
+  <path d="M128 116h310" stroke="#c5d8ea" stroke-width="10" stroke-linecap="round" stroke-opacity=".34"/>
+
+  <image href="../icons/plasma-drop.svg" x="139" y="178" width="308" height="308"/>
+  <path d="M143 500h298" stroke="url(#accent)" stroke-width="7" stroke-linecap="round" opacity=".75"/>
+
+  <text x="520" y="283" font-family="Inter, Noto Sans, Segoe UI, Arial, sans-serif" font-size="82" font-weight="800" fill="#edf7ff">plasma-drop</text>
+  <text x="524" y="352" font-family="Inter, Noto Sans, Segoe UI, Arial, sans-serif" font-size="34" font-weight="650" fill="#87e9ff">KDE Plasma 6 dropdown app launcher</text>
+  <text x="524" y="411" font-family="JetBrains Mono, Hack, Consolas, monospace" font-size="29" font-weight="700" fill="#9fffe3">&gt; yakuake-style drop-down behavior</text>
+  <text x="524" y="455" font-family="JetBrains Mono, Hack, Consolas, monospace" font-size="29" font-weight="700" fill="#d8ebff">&gt; for any app you configure</text>
+  <path d="M524 492h250M806 492h82M919 492h172" stroke="#70d9ff" stroke-width="8" stroke-linecap="round" stroke-opacity=".2"/>
+
+  <path d="M88 82h1104v476H88z" fill="none" stroke="#6bd7ff" stroke-width="2" stroke-opacity=".32"/>
+</svg>

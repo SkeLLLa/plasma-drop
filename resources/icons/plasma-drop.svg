@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">plasma-drop icon</title>
+  <desc id="desc">A large raindrop terminal mark with code-like lines for plasma-drop.</desc>
+  <defs>
+    <linearGradient id="drop-fill" x1="56" y1="20" x2="200" y2="236" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#56677c"/>
+      <stop offset=".52" stop-color="#1c2938"/>
+      <stop offset="1" stop-color="#0d1520"/>
+    </linearGradient>
+    <linearGradient id="terminal-gloss" x1="70" y1="36" x2="194" y2="168" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff" stop-opacity=".24"/>
+      <stop offset=".58" stop-color="#ffffff" stop-opacity=".05"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="highlight" cx="84" cy="60" r="134" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff" stop-opacity=".42"/>
+      <stop offset=".34" stop-color="#ffffff" stop-opacity=".12"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="148%" color-interpolation-filters="sRGB">
+      <feOffset in="SourceAlpha" dx="0" dy="9" result="offset"/>
+      <feGaussianBlur in="offset" stdDeviation="9" result="blur"/>
+      <feFlood flood-color="#0b355a" flood-opacity=".36" result="color"/>
+      <feComposite in="color" in2="blur" operator="in" result="shadow"/>
+      <feMerge>
+        <feMergeNode in="shadow"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <clipPath id="drop-clip">
+      <path d="M128 16C102 52 73 83 56 121c-23 51 5 112 59 126 8 2 18 2 26 0 54-14 82-75 59-126-17-38-46-69-72-105z"/>
+    </clipPath>
+  </defs>
+
+  <path d="M128 16C102 52 73 83 56 121c-23 51 5 112 59 126 8 2 18 2 26 0 54-14 82-75 59-126-17-38-46-69-72-105z" fill="#0a5b99" opacity=".28" transform="translate(0 5)"/>
+  <path d="M128 16C102 52 73 83 56 121c-23 51 5 112 59 126 8 2 18 2 26 0 54-14 82-75 59-126-17-38-46-69-72-105z" fill="url(#drop-fill)" filter="url(#shadow)"/>
+  <path d="M128 16C102 52 73 83 56 121c-23 51 5 112 59 126 8 2 18 2 26 0 54-14 82-75 59-126-17-38-46-69-72-105z" fill="url(#highlight)"/>
+
+  <g clip-path="url(#drop-clip)">
+    <path d="M45 81h166v43H45z" fill="#3b475c"/>
+    <path d="M45 123h166" stroke="#58cfff" stroke-width="4" stroke-linecap="round" stroke-opacity=".82"/>
+    <path d="M80 103h96" stroke="#b9d7ec" stroke-opacity=".45" stroke-width="6" stroke-linecap="round"/>
+
+    <path d="M75 148l30 26-30 26" fill="none" stroke="#78ffd6" stroke-width="15" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M124 204h48" stroke="#e5f3ff" stroke-width="13" stroke-linecap="round"/>
+
+    <path d="M121 146h54M134 164h38M72 221h74M158 221h26" stroke="#70d9ff" stroke-opacity=".24" stroke-width="6" stroke-linecap="round"/>
+    <path d="M88 136h71M88 225h38" stroke="#9fffe3" stroke-opacity=".58" stroke-width="5" stroke-linecap="round"/>
+    <path d="M93 189h34M138 189h42M93 207h22M128 207h57" stroke="#cde8ff" stroke-opacity=".52" stroke-width="5" stroke-linecap="round"/>
+    <path d="M70 71h172v44H70z" fill="#ffffff" opacity=".08" transform="rotate(-24 128 93)"/>
+    <path d="M55 216h150v34H55z" fill="#008cd6" opacity=".16"/>
+    <path d="M55 123h146v123H55z" fill="url(#terminal-gloss)"/>
+  </g>
+
+  <path d="M128 16C102 52 73 83 56 121c-23 51 5 112 59 126 8 2 18 2 26 0 54-14 82-75 59-126-17-38-46-69-72-105z" fill="none" stroke="#6bd7ff" stroke-width="7" stroke-linejoin="round"/>
+  <path d="M92 61c-16 21-31 39-40 61-12 29-8 61 9 88" fill="none" stroke="#ffffff" stroke-linecap="round" stroke-width="8" opacity=".26"/>
+</svg>

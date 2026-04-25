@@ -1,5 +1,9 @@
 # plasma-drop
 
+<p align="center">
+  <img src="resources/icons/plasma-drop-icon.svg" alt="plasma-drop icon" width="128" height="128">
+</p>
+
 [![CI](https://github.com/SkeLLLa/plasma-drop/actions/workflows/ci.yml/badge.svg)](https://github.com/SkeLLLa/plasma-drop/actions/workflows/ci.yml)
 [![Release](https://github.com/SkeLLLa/plasma-drop/actions/workflows/release.yml/badge.svg)](https://github.com/SkeLLLa/plasma-drop/actions/workflows/release.yml)
 [![Crates.io](https://img.shields.io/crates/v/plasma-drop.svg)](https://crates.io/crates/plasma-drop)

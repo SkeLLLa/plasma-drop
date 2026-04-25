@@ -3,8 +3,15 @@
 ## Repo Layout
 
 - `src/`: runtime code
-- `resources/`: `KWin` script, service file, and sample config
+- `resources/`: `KWin` script, service file, sample config, and visual assets
 - `docs/`: user and maintainer documentation
+
+Visual assets live under:
+
+- `resources/icons/plasma-drop-icon.svg`: compact README/docs mark.
+- `resources/icons/plasma-drop-icon.png`: PNG fallback shipped with native packages.
+- `resources/icons/plasma-drop.svg` and `resources/icons/plasma-drop-512.png`: larger app icon variants.
+- `resources/social/github-social-preview.svg` and `.png`: GitHub repository social preview assets.
 
 ## Local Task Runners
 
