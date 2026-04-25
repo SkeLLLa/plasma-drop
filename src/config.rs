@@ -77,6 +77,7 @@ pub struct AppConfig {
     pub window_title: Option<Regex>,
     pub attach_mode: AttachMode,
     pub working_directory: Option<PathBuf>,
+    pub hide_decorations: bool,
     pub placement: PlacementConfig,
     pub animation: AnimationConfig,
 }
@@ -98,6 +99,7 @@ struct RawAppConfig {
     attach_mode: Option<String>,
     arguments: Option<Vec<String>>,
     working_directory: Option<PathBuf>,
+    hide_decorations: Option<bool>,
     placement: Option<RawPlacementConfig>,
     animation: Option<RawAnimationConfig>,
 }
@@ -204,6 +206,7 @@ impl Config {
                 window_title,
                 attach_mode,
                 working_directory: app.working_directory,
+                hide_decorations: app.hide_decorations.unwrap_or(false),
                 placement,
                 animation,
             });
@@ -474,6 +477,7 @@ mod tests {
             attach_mode: None,
             arguments: None,
             working_directory: None,
+            hide_decorations: None,
             placement: None,
             animation: None,
         }
@@ -535,6 +539,16 @@ mod tests {
         let config = Config::from_raw(make_raw(vec![app("terminal", "ctrl+grave")])).unwrap();
         assert_eq!(config.apps[0].placement, PlacementConfig::default());
         assert_eq!(config.apps[0].animation, AnimationConfig::default());
+        assert!(!config.apps[0].hide_decorations);
+    }
+
+    #[test]
+    fn accepts_hide_decorations_option() {
+        let mut raw = app("terminal", "ctrl+grave");
+        raw.hide_decorations = Some(true);
+
+        let config = Config::from_raw(make_raw(vec![raw])).unwrap();
+        assert!(config.apps[0].hide_decorations);
     }
 
     #[test]

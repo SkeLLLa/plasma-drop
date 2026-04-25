@@ -3,6 +3,7 @@ name = "dolphin"
 hotkey = "super+f9"
 filename = "/usr/bin/dolphin"
 attach_mode = "find-or-start"
+hide_decorations = true
 
 [app.placement]
 width = "50%"

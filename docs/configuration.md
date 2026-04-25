@@ -12,6 +12,7 @@ The config file is TOML and contains one or more `[[app]]` entries.
 - `window_title`: optional regex matcher against the caption
 - `attach_mode`: `find` or `find-or-start`
 - `working_directory`: optional absolute working directory
+- `hide_decorations`: optional boolean; hide the `KWin` title bar/border while plasma-drop manages the window
 
 ## Matching Behavior
 
@@ -31,6 +32,12 @@ If `command` is present, it is used exactly as the spawn command.
 If `command` is omitted, spawning falls back to `filename` plus legacy `arguments`.
 
 This split is important for wrapper-based apps such as Flatpak, where launch identity and window identity can differ.
+
+## Window Decorations
+
+Set `hide_decorations = true` in an `[[app]]` entry to remove the `KWin` title bar and border while plasma-drop controls that window.
+
+plasma-drop records the window's original decoration state when it attaches and restores it on shutdown. Existing undecorated windows remain undecorated.
 
 ## Placement
 

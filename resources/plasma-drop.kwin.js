@@ -24,6 +24,7 @@ const mapWindow = (window) => ({
         width: window.frameGeometry.width,
         height: window.frameGeometry.height,
     },
+    noBorder: Boolean(window.noBorder),
 });
 
 kwin.getWindows = () => workspace.windowList();
@@ -139,6 +140,11 @@ cmds["SET_WINDOW_OPACITY"] = (params) => {
         throw new Error("SET_WINDOW_OPACITY requires a numeric opacity");
     }
     window.opacity = opacity;
+    return {};
+};
+cmds["SET_WINDOW_NO_BORDER"] = (params) => {
+    const window = kwin.getWindowByInternalIdRequired(params.internalId);
+    window.noBorder = Boolean(params.noBorder);
     return {};
 };
 cmds["BRING_WINDOW_TO_FOREGROUND"] = (params) => {

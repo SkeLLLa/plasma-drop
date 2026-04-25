@@ -23,6 +23,8 @@ pub struct ManagedWindow {
     pub caption: String,
     #[serde(rename = "frameGeometry")]
     pub frame_geometry: FrameGeometry,
+    #[serde(rename = "noBorder")]
+    pub no_border: bool,
 }
 
 pub fn find_best_match<'a>(
@@ -94,6 +96,7 @@ mod tests {
             window_title: None,
             attach_mode: AttachMode::FindOrStart,
             working_directory: None,
+            hide_decorations: false,
             placement: PlacementConfig::default(),
             animation: AnimationConfig::default(),
         }
@@ -112,6 +115,7 @@ mod tests {
                 width: 100,
                 height: 50,
             },
+            no_border: false,
         }
     }
 

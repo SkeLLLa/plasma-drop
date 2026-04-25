@@ -263,6 +263,15 @@ impl KWinClient {
         Ok(())
     }
 
+    pub async fn set_window_no_border(&self, internal_id: &str, no_border: bool) -> Result<()> {
+        self.send_command::<Value>(
+            "SET_WINDOW_NO_BORDER",
+            json!({ "internalId": internal_id, "noBorder": no_border }),
+        )
+        .await?;
+        Ok(())
+    }
+
     pub async fn bring_window_to_foreground(&self, internal_id: &str) -> Result<()> {
         self.send_command::<Value>(
             "BRING_WINDOW_TO_FOREGROUND",
@@ -343,6 +352,10 @@ impl WindowManager for KWinClient {
 
     async fn set_window_opacity(&self, internal_id: &str, opacity: f64) -> Result<()> {
         Self::set_window_opacity(self, internal_id, opacity).await
+    }
+
+    async fn set_window_no_border(&self, internal_id: &str, no_border: bool) -> Result<()> {
+        Self::set_window_no_border(self, internal_id, no_border).await
     }
 
     async fn bring_window_to_foreground(&self, internal_id: &str) -> Result<()> {

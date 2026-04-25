@@ -7,6 +7,7 @@ pub struct ManagedApp {
     pub config: AppConfig,
     pub tracked_window_id: Option<String>,
     pub restore_geometry: Option<FrameGeometry>,
+    pub restore_no_border: Option<bool>,
     pub visible: bool,
     pub shortcut_id: String,
 }

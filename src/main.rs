@@ -166,6 +166,7 @@ fn build_registry_entries(config: &Config) -> Vec<ManagedApp> {
             config: app.clone(),
             tracked_window_id: None,
             restore_geometry: None,
+            restore_no_border: None,
             visible: false,
             shortcut_id: format!("{HOTKEY_PREFIX}{}_{}", app.sanitized_name(), idx + 1),
         })

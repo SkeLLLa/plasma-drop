@@ -129,6 +129,10 @@ impl ToggleService {
         drop(registry);
 
         let window = self.resolve_window(&config, existing_id).await?;
+        if config.hide_decorations {
+            self.hide_window_decorations(app_name, &window).await?;
+        }
+
         let visible_rect = self.screen.placement_rect(&config.placement);
         if let Some(plan) = TransitionPlan::from_config(
             &config.animation,
@@ -247,6 +251,26 @@ impl ToggleService {
     async fn apply_geometry(&self, internal_id: &str, geometry: &FrameGeometry) -> Result<()> {
         self.kwin.move_window(internal_id, geometry).await?;
         self.kwin.resize_window(internal_id, geometry).await?;
+        Ok(())
+    }
+
+    async fn hide_window_decorations(&self, app_name: &str, window: &ManagedWindow) -> Result<()> {
+        let mut registry = self.registry.lock().await;
+        let app = registry
+            .managed_app_mut(app_name)
+            .with_context(|| format!("unknown app '{app_name}'"))?;
+        let is_new_window = app.tracked_window_id.as_deref() != Some(window.internal_id.as_str());
+        if is_new_window || app.restore_no_border.is_none() {
+            app.restore_no_border = Some(window.no_border);
+        }
+        drop(registry);
+
+        if !window.no_border {
+            self.kwin
+                .set_window_no_border(&window.internal_id, true)
+                .await?;
+        }
+
         Ok(())
     }
 
@@ -392,29 +416,42 @@ impl ToggleService {
                     Some((
                         app.config.name.clone(),
                         app.tracked_window_id.clone()?,
-                        app.restore_geometry.clone()?,
+                        app.restore_geometry.clone(),
+                        app.restore_no_border,
                     ))
                 })
                 .collect()
         };
 
-        for (app_name, window_id, restore_geometry) in tracked_windows {
+        for (app_name, window_id, restore_geometry, restore_no_border) in tracked_windows {
             if self.kwin.get_window(&window_id).await?.is_none() {
                 continue;
             }
 
-            self.kwin.move_window(&window_id, &restore_geometry).await?;
-            self.kwin
-                .resize_window(&window_id, &restore_geometry)
-                .await?;
-            info!(
-                "restored app '{}' before shutdown (previous geometry was {}x{} at {},{})",
-                app_name,
-                restore_geometry.width,
-                restore_geometry.height,
-                restore_geometry.x,
-                restore_geometry.y
-            );
+            if let Some(restore_geometry) = restore_geometry {
+                self.kwin.move_window(&window_id, &restore_geometry).await?;
+                self.kwin
+                    .resize_window(&window_id, &restore_geometry)
+                    .await?;
+                info!(
+                    "restored app '{}' geometry before shutdown (previous geometry was {}x{} at {},{})",
+                    app_name,
+                    restore_geometry.width,
+                    restore_geometry.height,
+                    restore_geometry.x,
+                    restore_geometry.y
+                );
+            }
+
+            if let Some(no_border) = restore_no_border {
+                self.kwin
+                    .set_window_no_border(&window_id, no_border)
+                    .await?;
+                info!(
+                    "restored app '{}' decoration state before shutdown (no_border={})",
+                    app_name, no_border
+                );
+            }
         }
 
         Ok(())
@@ -513,6 +550,14 @@ mod tests {
             Ok(())
         }
 
+        async fn set_window_no_border(&self, internal_id: &str, no_border: bool) -> Result<()> {
+            self.calls
+                .lock()
+                .await
+                .push(format!("no_border:{internal_id}:{no_border}"));
+            Ok(())
+        }
+
         async fn bring_window_to_foreground(&self, internal_id: &str) -> Result<()> {
             self.calls
                 .lock()
@@ -522,57 +567,89 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn toggle_on_uses_move_resize_foreground_order() {
-        let app = AppConfig {
-            name: "dolphin".into(),
-            hotkey: Hotkey::parse("super+f9").unwrap(),
-            filename: Some("dolphin".into()),
-            command: vec!["dolphin".into()],
+    fn app(name: &str, hotkey: &str, filename: &str) -> AppConfig {
+        AppConfig {
+            name: name.into(),
+            hotkey: Hotkey::parse(hotkey).unwrap(),
+            filename: Some(filename.into()),
+            command: vec![filename.into()],
             process_name: None,
             window_title: None,
             attach_mode: AttachMode::FindOrStart,
             working_directory: None,
+            hide_decorations: false,
             placement: PlacementConfig::default(),
             animation: AnimationConfig::default(),
-        };
-        let managed = ManagedApp {
-            config: app,
-            tracked_window_id: Some("{abc}".into()),
+        }
+    }
+
+    fn managed_app(config: AppConfig, tracked_window_id: &str, visible: bool) -> ManagedApp {
+        ManagedApp {
+            shortcut_id: format!("plasma_drop_hotkey_{}_1", config.sanitized_name()),
+            config,
+            tracked_window_id: Some(tracked_window_id.into()),
             restore_geometry: None,
-            visible: false,
-            shortcut_id: "plasma_drop_hotkey_dolphin_1".into(),
-        };
-        let registry = Arc::new(Mutex::new(AppRegistry::new(vec![managed])));
-        let kwin = Arc::new(MockKWin {
+            restore_no_border: None,
+            visible,
+        }
+    }
+
+    const fn geometry(x: i32, y: i32, width: i32, height: i32) -> FrameGeometry {
+        FrameGeometry {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
+    fn window(
+        internal_id: &str,
+        identity: &str,
+        caption: &str,
+        frame_geometry: FrameGeometry,
+    ) -> ManagedWindow {
+        ManagedWindow {
+            internal_id: internal_id.into(),
+            desktop_file_name: identity.into(),
+            resource_class: identity.into(),
+            resource_name: identity.into(),
+            caption: caption.into(),
+            frame_geometry,
+            no_border: false,
+        }
+    }
+
+    fn screen() -> ScreenInfo {
+        ScreenInfo {
+            index: 0,
+            name: "screen".into(),
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1080,
+        }
+    }
+
+    fn mock_kwin(window: Option<ManagedWindow>) -> Arc<MockKWin> {
+        Arc::new(MockKWin {
             calls: Mutex::new(Vec::new()),
-            window: Mutex::new(Some(ManagedWindow {
-                internal_id: "{abc}".into(),
-                desktop_file_name: "dolphin".into(),
-                resource_class: "dolphin".into(),
-                resource_name: "dolphin".into(),
-                caption: "Dolphin".into(),
-                frame_geometry: FrameGeometry {
-                    x: 10,
-                    y: 20,
-                    width: 300,
-                    height: 400,
-                },
-            })),
+            window: Mutex::new(window),
             windows: Mutex::new(Vec::new()),
-        });
-        let service = ToggleService::new(
-            registry,
-            kwin.clone(),
-            ScreenInfo {
-                index: 0,
-                name: "screen".into(),
-                x: 0,
-                y: 0,
-                width: 1920,
-                height: 1080,
-            },
-        );
+        })
+    }
+
+    #[tokio::test]
+    async fn toggle_on_uses_move_resize_foreground_order() {
+        let managed = managed_app(app("dolphin", "super+f9", "dolphin"), "{abc}", false);
+        let registry = Arc::new(Mutex::new(AppRegistry::new(vec![managed])));
+        let kwin = mock_kwin(Some(window(
+            "{abc}",
+            "dolphin",
+            "Dolphin",
+            geometry(10, 20, 300, 400),
+        )));
+        let service = ToggleService::new(registry, kwin.clone(), screen());
 
         service.toggle_app("dolphin").await.unwrap();
 
@@ -588,26 +665,73 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn toggle_on_hides_decorations_when_configured() {
+        let mut app = app("dolphin", "super+f9", "dolphin");
+        app.hide_decorations = true;
+        let managed = managed_app(app, "{abc}", false);
+        let registry = Arc::new(Mutex::new(AppRegistry::new(vec![managed])));
+        let kwin = mock_kwin(Some(window(
+            "{abc}",
+            "dolphin",
+            "Dolphin",
+            geometry(10, 20, 300, 400),
+        )));
+        let service = ToggleService::new(registry.clone(), kwin.clone(), screen());
+
+        service.toggle_app("dolphin").await.unwrap();
+
+        let calls = kwin.calls.lock().await.clone();
+        assert_eq!(
+            calls,
+            vec![
+                "no_border:{abc}:true".to_string(),
+                "move:{abc}:0:0:1920:1080".to_string(),
+                "resize:{abc}:0:0:1920:1080".to_string(),
+                "foreground:{abc}".to_string()
+            ]
+        );
+        let restore_no_border = registry
+            .lock()
+            .await
+            .managed_app("dolphin")
+            .unwrap()
+            .restore_no_border;
+        assert_eq!(restore_no_border, Some(false));
+    }
+
+    #[tokio::test]
+    async fn shutdown_restores_original_decoration_state() {
+        let mut app = app("dolphin", "super+f9", "dolphin");
+        app.hide_decorations = true;
+        let restore_geometry = geometry(10, 20, 300, 400);
+        let mut managed = managed_app(app, "{abc}", false);
+        managed.restore_geometry = Some(restore_geometry.clone());
+        managed.restore_no_border = Some(false);
+        let registry = Arc::new(Mutex::new(AppRegistry::new(vec![managed])));
+        let mut tracked_window = window("{abc}", "dolphin", "Dolphin", restore_geometry);
+        tracked_window.no_border = true;
+        let kwin = mock_kwin(Some(tracked_window));
+        let service = ToggleService::new(registry, kwin.clone(), screen());
+
+        service.restore_tracked_windows_on_shutdown().await.unwrap();
+
+        let calls = kwin.calls.lock().await.clone();
+        assert_eq!(
+            calls,
+            vec![
+                "move:{abc}:10:20:300:400".to_string(),
+                "resize:{abc}:10:20:300:400".to_string(),
+                "no_border:{abc}:false".to_string()
+            ]
+        );
+    }
+
+    #[tokio::test]
     async fn different_placements_produce_different_rects() {
         fn make_app(name: &str, hotkey: &str, placement: PlacementConfig) -> ManagedApp {
-            ManagedApp {
-                config: AppConfig {
-                    name: name.into(),
-                    hotkey: Hotkey::parse(hotkey).unwrap(),
-                    filename: Some("irrelevant".into()),
-                    command: vec!["irrelevant".into()],
-                    process_name: None,
-                    window_title: None,
-                    attach_mode: AttachMode::FindOrStart,
-                    working_directory: None,
-                    placement,
-                    animation: AnimationConfig::default(),
-                },
-                tracked_window_id: Some(format!("{{{name}}}")),
-                restore_geometry: None,
-                visible: false,
-                shortcut_id: format!("plasma_drop_hotkey_{name}_1"),
-            }
+            let mut app = app(name, hotkey, "irrelevant");
+            app.placement = placement;
+            managed_app(app, &format!("{{{name}}}"), false)
         }
 
         let left = make_app(
@@ -634,35 +758,13 @@ mod tests {
         );
 
         let registry = Arc::new(Mutex::new(AppRegistry::new(vec![left, right])));
-        let kwin = Arc::new(MockKWin {
-            calls: Mutex::new(Vec::new()),
-            window: Mutex::new(Some(ManagedWindow {
-                internal_id: "placeholder".into(),
-                desktop_file_name: "irrelevant".into(),
-                resource_class: "irrelevant".into(),
-                resource_name: "irrelevant".into(),
-                caption: "irrelevant".into(),
-                frame_geometry: FrameGeometry {
-                    x: 0,
-                    y: 0,
-                    width: 100,
-                    height: 100,
-                },
-            })),
-            windows: Mutex::new(Vec::new()),
-        });
-        let service = ToggleService::new(
-            registry,
-            kwin.clone(),
-            ScreenInfo {
-                index: 0,
-                name: "screen".into(),
-                x: 0,
-                y: 0,
-                width: 1920,
-                height: 1080,
-            },
-        );
+        let kwin = mock_kwin(Some(window(
+            "placeholder",
+            "irrelevant",
+            "irrelevant",
+            geometry(0, 0, 100, 100),
+        )));
+        let service = ToggleService::new(registry, kwin.clone(), screen());
 
         service.toggle_app("left").await.unwrap();
         service.toggle_app("right").await.unwrap();
@@ -683,61 +785,23 @@ mod tests {
 
     #[tokio::test]
     async fn toggle_off_uses_computed_hidden_rect() {
-        let app = AppConfig {
-            name: "dolphin".into(),
-            hotkey: Hotkey::parse("super+f9").unwrap(),
-            filename: Some("dolphin".into()),
-            command: vec!["dolphin".into()],
-            process_name: None,
-            window_title: None,
-            attach_mode: AttachMode::FindOrStart,
-            working_directory: None,
-            placement: PlacementConfig {
-                width: PlacementMetric::Percent(50),
-                height: PlacementMetric::Percent(100),
-                position: PlacementPosition::Right,
-                offset_x: PlacementMetric::Pixels(0),
-                offset_y: PlacementMetric::Pixels(0),
-            },
-            animation: AnimationConfig::default(),
+        let mut app = app("dolphin", "super+f9", "dolphin");
+        app.placement = PlacementConfig {
+            width: PlacementMetric::Percent(50),
+            height: PlacementMetric::Percent(100),
+            position: PlacementPosition::Right,
+            offset_x: PlacementMetric::Pixels(0),
+            offset_y: PlacementMetric::Pixels(0),
         };
-        let managed = ManagedApp {
-            config: app,
-            tracked_window_id: Some("{abc}".into()),
-            restore_geometry: None,
-            visible: true,
-            shortcut_id: "plasma_drop_hotkey_dolphin_1".into(),
-        };
+        let managed = managed_app(app, "{abc}", true);
         let registry = Arc::new(Mutex::new(AppRegistry::new(vec![managed])));
-        let kwin = Arc::new(MockKWin {
-            calls: Mutex::new(Vec::new()),
-            window: Mutex::new(Some(ManagedWindow {
-                internal_id: "{abc}".into(),
-                desktop_file_name: "dolphin".into(),
-                resource_class: "dolphin".into(),
-                resource_name: "dolphin".into(),
-                caption: "Dolphin".into(),
-                frame_geometry: FrameGeometry {
-                    x: 10,
-                    y: 20,
-                    width: 300,
-                    height: 400,
-                },
-            })),
-            windows: Mutex::new(Vec::new()),
-        });
-        let service = ToggleService::new(
-            registry,
-            kwin.clone(),
-            ScreenInfo {
-                index: 0,
-                name: "screen".into(),
-                x: 0,
-                y: 0,
-                width: 1920,
-                height: 1080,
-            },
-        );
+        let kwin = mock_kwin(Some(window(
+            "{abc}",
+            "dolphin",
+            "Dolphin",
+            geometry(10, 20, 300, 400),
+        )));
+        let service = ToggleService::new(registry, kwin.clone(), screen());
 
         service.toggle_app("dolphin").await.unwrap();
 
@@ -747,62 +811,34 @@ mod tests {
 
     #[tokio::test]
     async fn toggle_off_recovers_when_tracked_window_id_is_stale() {
-        let app = AppConfig {
-            name: "chromium-flatpak".into(),
-            hotkey: Hotkey::parse("super+f6").unwrap(),
-            filename: Some("io.github.ungoogled_software.ungoogled_chromium".into()),
-            command: vec!["/usr/bin/flatpak".into(), "run".into()],
-            process_name: None,
-            window_title: None,
-            attach_mode: AttachMode::FindOrStart,
-            working_directory: None,
-            placement: PlacementConfig {
-                width: PlacementMetric::Percent(50),
-                height: PlacementMetric::Percent(100),
-                position: PlacementPosition::Left,
-                offset_x: PlacementMetric::Pixels(0),
-                offset_y: PlacementMetric::Pixels(0),
-            },
-            animation: AnimationConfig::default(),
+        let mut app = app(
+            "chromium-flatpak",
+            "super+f6",
+            "io.github.ungoogled_software.ungoogled_chromium",
+        );
+        app.command = vec!["/usr/bin/flatpak".into(), "run".into()];
+        app.placement = PlacementConfig {
+            width: PlacementMetric::Percent(50),
+            height: PlacementMetric::Percent(100),
+            position: PlacementPosition::Left,
+            offset_x: PlacementMetric::Pixels(0),
+            offset_y: PlacementMetric::Pixels(0),
         };
-        let managed = ManagedApp {
-            config: app,
-            tracked_window_id: Some("{stale}".into()),
-            restore_geometry: None,
-            visible: true,
-            shortcut_id: "plasma_drop_hotkey_chromium_flatpak_1".into(),
-        };
+        let managed = managed_app(app, "{stale}", true);
         let registry = Arc::new(Mutex::new(AppRegistry::new(vec![managed])));
-        let current_window = ManagedWindow {
-            internal_id: "{fresh}".into(),
-            desktop_file_name: "io.github.ungoogled_software.ungoogled_chromium".into(),
-            resource_class: "chromium".into(),
-            resource_name: "chromium".into(),
-            caption: "Ungoogled Chromium".into(),
-            frame_geometry: FrameGeometry {
-                x: 0,
-                y: 0,
-                width: 960,
-                height: 1080,
-            },
-        };
+        let mut current_window = window(
+            "{fresh}",
+            "chromium",
+            "Ungoogled Chromium",
+            geometry(0, 0, 960, 1080),
+        );
+        current_window.desktop_file_name = "io.github.ungoogled_software.ungoogled_chromium".into();
         let kwin = Arc::new(MockKWin {
             calls: Mutex::new(Vec::new()),
             window: Mutex::new(None),
             windows: Mutex::new(vec![current_window]),
         });
-        let service = ToggleService::new(
-            registry.clone(),
-            kwin.clone(),
-            ScreenInfo {
-                index: 0,
-                name: "screen".into(),
-                x: 0,
-                y: 0,
-                width: 1920,
-                height: 1080,
-            },
-        );
+        let service = ToggleService::new(registry.clone(), kwin.clone(), screen());
 
         service.toggle_app("chromium-flatpak").await.unwrap();
 
@@ -820,43 +856,16 @@ mod tests {
 
     #[tokio::test]
     async fn externally_closed_visible_app_is_treated_as_not_visible() {
-        let app = AppConfig {
-            name: "terminal".into(),
-            hotkey: Hotkey::parse("super+f6").unwrap(),
-            filename: Some("kitty".into()),
-            command: vec!["kitty".into()],
-            process_name: None,
-            window_title: None,
-            attach_mode: AttachMode::Find,
-            working_directory: None,
-            placement: PlacementConfig::default(),
-            animation: AnimationConfig::default(),
-        };
-        let managed = ManagedApp {
-            config: app,
-            tracked_window_id: Some("{stale}".into()),
-            restore_geometry: None,
-            visible: true,
-            shortcut_id: "plasma_drop_hotkey_terminal_1".into(),
-        };
+        let mut app = app("terminal", "super+f6", "kitty");
+        app.attach_mode = AttachMode::Find;
+        let managed = managed_app(app, "{stale}", true);
         let registry = Arc::new(Mutex::new(AppRegistry::new(vec![managed])));
         let kwin = Arc::new(MockKWin {
             calls: Mutex::new(Vec::new()),
             window: Mutex::new(None),
             windows: Mutex::new(Vec::new()),
         });
-        let service = ToggleService::new(
-            registry.clone(),
-            kwin,
-            ScreenInfo {
-                index: 0,
-                name: "screen".into(),
-                x: 0,
-                y: 0,
-                width: 1920,
-                height: 1080,
-            },
-        );
+        let service = ToggleService::new(registry.clone(), kwin, screen());
 
         let err = service.toggle_app("terminal").await.unwrap_err();
         assert!(
