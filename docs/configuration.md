@@ -57,6 +57,8 @@ Supported metrics:
 - percentages like `"50%"`
 - pixel values like `"640px"`
 
+Offsets are applied before final screen clipping, so a `100%` width with `offset_x = "20px"` resolves to the shifted visible area rather than keeping the full screen width.
+
 Placement is resolved relative to screen `0` in the current implementation.
 
 ## Animation

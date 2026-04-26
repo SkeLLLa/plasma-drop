@@ -66,12 +66,12 @@ impl ScreenInfo {
         let offset_x = Self::resolve_metric(&placement.offset_x, self.width);
         let offset_y = Self::resolve_metric(&placement.offset_y, self.height);
 
-        let max_x = self.x + self.width - width;
-        let max_y = self.y + self.height - height;
+        let (x, width) = Self::place_axis(self.x, self.width, width, base_x, offset_x);
+        let (y, height) = Self::place_axis(self.y, self.height, height, base_y, offset_y);
 
         FrameGeometry {
-            x: (base_x + offset_x).clamp(self.x, max_x),
-            y: (base_y + offset_y).clamp(self.y, max_y),
+            x,
+            y,
             width,
             height,
         }
@@ -123,6 +123,27 @@ impl ScreenInfo {
             }
             PlacementMetric::Pixels(px) => *px,
         }
+    }
+
+    fn place_axis(
+        screen_start: i32,
+        screen_length: i32,
+        length: i32,
+        base_start: i32,
+        offset: i32,
+    ) -> (i32, i32) {
+        let screen_end = screen_start + screen_length;
+        let desired_start = base_start + offset;
+        let desired_end = desired_start + length;
+
+        let clipped_start = desired_start.max(screen_start);
+        let clipped_end = desired_end.min(screen_end);
+        if length == screen_length && clipped_start < clipped_end {
+            return (clipped_start, clipped_end - clipped_start);
+        }
+
+        let max_start = screen_end - length;
+        (desired_start.clamp(screen_start, max_start), length)
     }
 }
 
@@ -291,6 +312,66 @@ Name: eDP-1
             offset_y: PlacementMetric::Pixels(12),
         });
         assert_eq!((rect.x, rect.y), (408, 174));
+    }
+
+    #[test]
+    fn clips_full_size_rect_after_positive_offsets() {
+        let rect = screen().placement_rect(&PlacementConfig {
+            width: PlacementMetric::Percent(100),
+            height: PlacementMetric::Percent(100),
+            position: PlacementPosition::TopLeft,
+            offset_x: PlacementMetric::Pixels(20),
+            offset_y: PlacementMetric::Pixels(12),
+        });
+        assert_eq!(
+            (rect.x, rect.y, rect.width, rect.height),
+            (20, 12, 1900, 1068)
+        );
+    }
+
+    #[test]
+    fn clips_full_size_rect_after_negative_offsets() {
+        let rect = screen().placement_rect(&PlacementConfig {
+            width: PlacementMetric::Percent(100),
+            height: PlacementMetric::Percent(100),
+            position: PlacementPosition::BottomRight,
+            offset_x: PlacementMetric::Pixels(-20),
+            offset_y: PlacementMetric::Pixels(-12),
+        });
+        assert_eq!(
+            (rect.x, rect.y, rect.width, rect.height),
+            (0, 0, 1900, 1068)
+        );
+    }
+
+    #[test]
+    fn clips_full_width_without_shrinking_partial_height() {
+        let rect = screen().placement_rect(&PlacementConfig {
+            width: PlacementMetric::Percent(100),
+            height: PlacementMetric::Percent(50),
+            position: PlacementPosition::TopLeft,
+            offset_x: PlacementMetric::Pixels(20),
+            offset_y: PlacementMetric::Pixels(12),
+        });
+        assert_eq!(
+            (rect.x, rect.y, rect.width, rect.height),
+            (20, 12, 1900, 540)
+        );
+    }
+
+    #[test]
+    fn clips_full_height_without_shrinking_partial_width() {
+        let rect = screen().placement_rect(&PlacementConfig {
+            width: PlacementMetric::Percent(50),
+            height: PlacementMetric::Percent(100),
+            position: PlacementPosition::TopLeft,
+            offset_x: PlacementMetric::Pixels(20),
+            offset_y: PlacementMetric::Pixels(12),
+        });
+        assert_eq!(
+            (rect.x, rect.y, rect.width, rect.height),
+            (20, 12, 960, 1068)
+        );
     }
 
     #[test]
