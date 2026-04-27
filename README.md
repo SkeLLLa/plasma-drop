@@ -9,36 +9,223 @@
 [![Crates.io](https://img.shields.io/crates/v/plasma-drop.svg)](https://crates.io/crates/plasma-drop)
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](COPYING)
 
-`plasma-drop` is a KDE Plasma 6 dropdown app launcher built around KWin scripting and global shortcuts.
-Think Yakuake-style dropdown behavior, but for any app you configure.
+`plasma-drop` is a KDE Plasma 6 dropdown app launcher. It registers global shortcuts through
+KWin, finds or starts the apps you configure, and moves their windows into dropdown-style screen
+positions.
+
+Think Yakuake-style dropdown behavior, but for Dolphin, Kate, Chromium, or any other app you add to
+the config.
 
 It is heavily inspired by [windows-terminal-quake](https://github.com/flyingpie/windows-terminal-quake).
-If you need a GUI, a Windows version, or more configuration options, use that app.
+If you need a GUI, a Windows version, or a broader configuration surface, use that app.
+
+## Requirements
+
+- Linux desktop session
+- KDE Plasma 6 on Wayland
+- Session D-Bus
+- KWin scripting support
+
+`plasma-drop` does not target X11 or non-KWin compositors.
+
+## Install
+
+Choose one install path.
+
+### From the GitHub Pages Package Repositories
+
+Use this if you want updates through your system package manager.
+
+For Fedora, openSUSE, and other RPM-based systems:
+
+```bash
+sudo tee /etc/yum.repos.d/plasma-drop.repo >/dev/null <<'EOF'
+[plasma-drop]
+name=plasma-drop
+baseurl=https://skellla.github.io/plasma-drop/rpm/x86_64
+enabled=1
+gpgcheck=0
+repo_gpgcheck=0
+EOF
+sudo dnf install plasma-drop
+```
+
+For Debian, Ubuntu, and other APT-based systems:
+
+```bash
+echo 'deb [trusted=yes] https://skellla.github.io/plasma-drop/deb stable main' | sudo tee /etc/apt/sources.list.d/plasma-drop.list
+sudo apt update
+sudo apt install plasma-drop
+```
+
+Then create your user config and enable the user service:
+
+```bash
+mkdir -p ~/.config/plasma-drop
+cp /usr/share/plasma-drop/examples/config.toml ~/.config/plasma-drop/config.toml
+systemctl --user daemon-reload
+systemctl --user enable --now plasma-drop.service
+```
+
+### From Crates.io
+
+Use this if you already have Rust and Cargo:
+
+```bash
+cargo install --locked plasma-drop
+plasma-drop init --systemd
+systemctl --user daemon-reload
+systemctl --user enable --now plasma-drop.service
+```
+
+`plasma-drop init --systemd` creates:
+
+- `~/.config/plasma-drop/config.toml`
+- `~/.config/systemd/user/plasma-drop.service`
+
+Use `plasma-drop init` instead if you do not want a `systemd --user` service file.
+
+### From a GitHub Release Archive
+
+Download and extract the `tar.gz` release asset, then run:
+
+```bash
+cd plasma-drop-<version>-x86_64-unknown-linux-gnu
+./install-user.sh
+systemctl --user enable --now plasma-drop.service
+```
+
+The installer places the binary in `~/.local/bin`, copies the starter config to
+`~/.config/plasma-drop/config.toml`, and installs a user service for `systemd --user`.
+
+### From `deb` or `rpm`
+
+Install the package with your distro package manager, then create your user config:
+
+```bash
+mkdir -p ~/.config/plasma-drop
+cp /usr/share/plasma-drop/examples/config.toml ~/.config/plasma-drop/config.toml
+systemctl --user daemon-reload
+systemctl --user enable --now plasma-drop.service
+```
+
+The native packages install:
+
+- `/usr/bin/plasma-drop`
+- `/usr/lib/systemd/user/plasma-drop.service`
+- `/usr/share/plasma-drop/examples/config.toml`
+
+### With `mise`
+
+End users can install release builds through `mise`'s GitHub backend:
+
+```bash
+mise use -g github:SkeLLLa/plasma-drop
+plasma-drop init --systemd
+systemctl --user daemon-reload
+systemctl --user enable --now plasma-drop.service
+```
+
+To pin a specific release:
+
+```bash
+mise use -g github:SkeLLLa/plasma-drop@1.0.0
+```
+
+## First Run
+
+Edit the starter config before relying on the service:
+
+```bash
+$EDITOR ~/.config/plasma-drop/config.toml
+systemctl --user restart plasma-drop.service
+```
+
+Watch logs while testing:
+
+```bash
+journalctl --user -u plasma-drop.service -f
+```
+
+If your session does not use `systemd --user`, start `plasma-drop` from your session startup
+instead:
+
+```bash
+plasma-drop --config ~/.config/plasma-drop/config.toml
+```
+
+For foreground debugging:
+
+```bash
+plasma-drop --config ~/.config/plasma-drop/config.toml -v
+```
+
+## Configure Apps
+
+Configuration is TOML. Each `[[app]]` entry defines one managed app, its hotkey, how to find or
+launch it, and where to place it.
+
+Minimal example:
+
+```toml
+[[app]]
+name = "dolphin"
+hotkey = "super+f9"
+filename = "/usr/bin/dolphin"
+attach_mode = "find-or-start"
+hide_decorations = true
+
+[app.placement]
+width = "50%"
+height = "100%"
+position = "left"
+```
+
+Common fields:
+
+| Field | Purpose |
+| --- | --- |
+| `name` | Unique app identifier |
+| `hotkey` | Global shortcut, for example `super+f9` |
+| `filename` | App/window identity matcher |
+| `command` | Explicit launch command array, useful for wrappers such as Flatpak |
+| `attach_mode` | `find` or `find-or-start` |
+| `hide_decorations` | Hide the KWin title bar and border while managed |
+| `[app.placement]` | Width, height, position, and offsets |
+| `[app.animation]` | Optional slide/fade behavior |
+
+See [resources/example-config.toml](resources/example-config.toml) for native app and Flatpak
+examples, and [docs/configuration.md](docs/configuration.md) for every supported option.
 
 ## Documentation
 
-- Documentation index: [docs/index.md](docs/index.md)
-- Getting started: [docs/getting-started.md](docs/getting-started.md)
-- Configuration: [docs/configuration.md](docs/configuration.md)
-- Development: [docs/development.md](docs/development.md)
-- GitHub Copilot review setup: [docs/copilot-review.md](docs/copilot-review.md)
-- Distribution: [docs/distribution.md](docs/distribution.md)
+- [Getting started](docs/getting-started.md)
+- [Configuration](docs/configuration.md)
+- [Distribution](docs/distribution.md)
+- [Development](docs/development.md)
+- [GitHub Copilot review setup](docs/copilot-review.md)
+- [Documentation index](docs/index.md)
 
-`cargo doc --no-deps --document-private-items` uses the guide pages in `docs/` as the crate documentation entry point.
+`cargo doc --no-deps --document-private-items` uses the guide pages in `docs/` as the crate
+documentation entry point.
 
-## Quality checks
+## Development
+
+This repo includes a pinned `.mise.toml` for contributor tooling. It is separate from the end-user
+`mise use -g github:SkeLLLa/plasma-drop` install flow.
+
+Typical setup:
+
+```bash
+mise install
+mise run build
+```
 
 Run the full local quality suite with either task runner:
 
 ```bash
 make check
 mise run check
-```
-
-Install pinned development tools first when using `mise`:
-
-```bash
-mise install
 ```
 
 Common project scripts:
@@ -55,24 +242,21 @@ Common project scripts:
 
 Both runners delegate to the same Cargo commands.
 
-## Distribution
+## Distribution and Releases
 
-Release CI now targets three Linux artifact types:
+Release CI builds:
 
 - `tar.gz` binary bundle with `install-user.sh`
 - `deb`
 - `rpm`
-- GitHub Pages RPM/APT repositories
+- GitHub Pages RPM/APT repository metadata
 
-Each artifact ships the `plasma-drop` binary, a user systemd unit, and an example config for a
-quicker first run. The detailed install layout and CI plan live in
-[docs/distribution.md](docs/distribution.md).
-
-## Releases
+Each artifact ships the `plasma-drop` binary, a user systemd unit, and an example config. The
+detailed install layout and CI plan live in [docs/distribution.md](docs/distribution.md).
 
 Version bumps, changelog updates, tags, and GitHub releases are managed with `release-plz`.
-Maintainers should use Conventional Commits so release-plz can infer the correct SemVer bump.
-CI enforces this with `opensource-nepal/commitlint@v1` on pull requests, except for Dependabot's
+Maintainers should use Conventional Commits so release-plz can infer the correct SemVer bump. CI
+enforces this with `opensource-nepal/commitlint@v1` on pull requests, except for Dependabot's
 generated dependency update commits.
 
 The repo release flow is:
@@ -86,90 +270,14 @@ The repo release flow is:
 7. The workflow publishes unsigned RPM/APT repository metadata to GitHub Pages
 
 Crates.io publishing uses trusted publishing through GitHub Actions OIDC. After the first manual
-crate publish, configure crates.io to trust `SkeLLLa/plasma-drop` and workflow `release.yml`;
-no long-lived Cargo registry token is required for later releases.
-
-## Cargo Install
-
-`plasma-drop` is also designed to work with `cargo install`:
-
-```bash
-cargo install --locked plasma-drop
-plasma-drop init --systemd
-systemctl --user daemon-reload
-systemctl --user enable --now plasma-drop.service
-```
-
-Without `systemd --user`, skip the service file and start it from your session startup:
-
-```bash
-plasma-drop init
-plasma-drop --config ~/.config/plasma-drop/config.toml
-```
-
-## Install With `mise`
-
-End users can also install `plasma-drop` from GitHub releases via `mise`'s `github` backend:
-
-```bash
-mise use -g github:SkeLLLa/plasma-drop
-plasma-drop init --systemd
-systemctl --user daemon-reload
-systemctl --user enable --now plasma-drop.service
-```
-
-To pin a specific release:
-
-```bash
-mise use -g github:SkeLLLa/plasma-drop@1.0.0
-```
-
-In a personal `mise.toml`, the same install can be declared as:
-
-```toml
-[tools]
-"github:SkeLLLa/plasma-drop" = "latest"
-```
-
-Without `systemd --user`, initialize the config and launch it from your session startup:
-
-```bash
-plasma-drop init
-plasma-drop --config ~/.config/plasma-drop/config.toml
-```
-
-## Development Setup With `mise`
-
-This repo includes a pinned `.mise.toml` for local
-tooling. That is intended for contributors and local automation. It is separate from the
-end-user `mise use -g github:SkeLLLa/plasma-drop` install flow above.
-
-Typical setup:
-
-```bash
-mise install
-mise run build
-```
-
-What `mise` provides here:
-
-- CLI tools pinned in `.mise.toml`
-- project-local development commands such as `mise run check`
-- MCP helper tools used in this workspace
-
-For end users who just want to run `plasma-drop`, prefer one of:
-
-- `mise use -g github:SkeLLLa/plasma-drop`
-- `cargo install --locked plasma-drop`
-- the GitHub release `tar.gz`
-- the GitHub release `deb`
-- the GitHub release `rpm`
+crate publish, configure crates.io to trust `SkeLLLa/plasma-drop` and workflow `release.yml`; no
+long-lived Cargo registry token is required for later releases.
 
 ## Support
 
 If `plasma-drop` is useful to you and you want to say thanks, please consider supporting Ukrainian
 defenders instead of sending money to the author.
 
-[![Come Back Alive](https://img.shields.io/badge/Donate-%F0%9F%87%BA%F0%9F%87%A6%20Come%20Back%20Alive-F5F5F5?labelColor=FFD700&color=F5F5F5)](https://savelife.in.ua/en/donate-en/)
-[![Sternenko Fund](https://img.shields.io/badge/Donate-%F0%9F%87%BA%F0%9F%87%A6%20Sternenko%20Fund-F5F5F5?labelColor=FFD700&color=F5F5F5)](https://www.sternenkofund.org/en/donate)
-[![Prytula Foundation](https://img.shields.io/badge/Donate-%F0%9F%87%BA%F0%9F%87%A6%20Prytula%20Foundation-F5F5F5?labelColor=FFD700&color=F5F5F5)](https://prytulafoundation.org/en/donation)
+[![Come Back Alive](resources/badges/donate-come-back-alive.svg)](https://savelife.in.ua/en/donate-en/)
+[![Sternenko Fund](resources/badges/donate-sternenko-fund.svg)](https://www.sternenkofund.org/en/donate)
+[![Prytula Foundation](resources/badges/donate-prytula-foundation.svg)](https://prytulafoundation.org/en/donation)

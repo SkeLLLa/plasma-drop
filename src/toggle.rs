@@ -205,8 +205,7 @@ impl ToggleService {
                 self.run_animation(&window.internal_id, &plan, false)
                     .await?;
             } else {
-                self.kwin
-                    .move_window(&window.internal_id, &hidden_rect)
+                self.apply_hidden_geometry(&window.internal_id, &hidden_rect)
                     .await?;
             }
 
@@ -270,6 +269,16 @@ impl ToggleService {
     async fn apply_geometry(&self, internal_id: &str, geometry: &FrameGeometry) -> Result<()> {
         self.kwin.move_window(internal_id, geometry).await?;
         self.kwin.resize_window(internal_id, geometry).await?;
+        Ok(())
+    }
+
+    async fn apply_hidden_geometry(
+        &self,
+        internal_id: &str,
+        geometry: &FrameGeometry,
+    ) -> Result<()> {
+        self.kwin.resize_window(internal_id, geometry).await?;
+        self.kwin.move_window(internal_id, geometry).await?;
         Ok(())
     }
 
@@ -915,7 +924,45 @@ mod tests {
         service.toggle_app("dolphin").await.unwrap();
 
         let calls = kwin.calls.lock().await.clone();
-        assert_eq!(calls, vec!["move:{abc}:960:-1080:960:1080".to_string()]);
+        assert_eq!(
+            calls,
+            vec![
+                "resize:{abc}:960:-1080:960:1080".to_string(),
+                "move:{abc}:960:-1080:960:1080".to_string()
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn toggle_off_resizes_before_parking_from_taller_screen() {
+        let mut app = app("dolphin", "super+f9", "dolphin");
+        app.placement = PlacementConfig {
+            width: PlacementMetric::Percent(50),
+            height: PlacementMetric::Percent(100),
+            position: PlacementPosition::Right,
+            offset_x: PlacementMetric::Pixels(0),
+            offset_y: PlacementMetric::Pixels(0),
+        };
+        let managed = managed_app(app, "{abc}", true);
+        let registry = Arc::new(Mutex::new(AppRegistry::new(vec![managed])));
+        let kwin = mock_kwin(Some(window(
+            "{abc}",
+            "dolphin",
+            "Dolphin",
+            geometry(960, 0, 960, 1200),
+        )));
+        let service = ToggleService::new(registry, kwin.clone(), vec![screen()]);
+
+        service.toggle_app("dolphin").await.unwrap();
+
+        let calls = kwin.calls.lock().await.clone();
+        assert_eq!(
+            calls,
+            vec![
+                "resize:{abc}:960:-1080:960:1080".to_string(),
+                "move:{abc}:960:-1080:960:1080".to_string()
+            ]
+        );
     }
 
     #[tokio::test]
@@ -941,7 +988,13 @@ mod tests {
         service.toggle_app("dolphin").await.unwrap();
 
         let calls = kwin.calls.lock().await.clone();
-        assert_eq!(calls, vec!["move:{abc}:960:-2160:960:1080".to_string()]);
+        assert_eq!(
+            calls,
+            vec![
+                "resize:{abc}:960:-2160:960:1080".to_string(),
+                "move:{abc}:960:-2160:960:1080".to_string()
+            ]
+        );
     }
 
     #[tokio::test]
@@ -1011,7 +1064,13 @@ mod tests {
         service.toggle_app("chromium-flatpak").await.unwrap();
 
         let calls = kwin.calls.lock().await.clone();
-        assert_eq!(calls, vec!["move:{fresh}:0:-1080:960:1080".to_string()]);
+        assert_eq!(
+            calls,
+            vec![
+                "resize:{fresh}:0:-1080:960:1080".to_string(),
+                "move:{fresh}:0:-1080:960:1080".to_string()
+            ]
+        );
         let tracked = registry
             .lock()
             .await
