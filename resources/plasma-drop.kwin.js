@@ -19,10 +19,10 @@ const mapWindow = (window) => ({
     resourceName: window.resourceName || "",
     caption: window.caption || "",
     frameGeometry: {
-        x: window.frameGeometry.x,
-        y: window.frameGeometry.y,
-        width: window.frameGeometry.width,
-        height: window.frameGeometry.height,
+        x: Math.round(window.frameGeometry.x),
+        y: Math.round(window.frameGeometry.y),
+        width: Math.round(window.frameGeometry.width),
+        height: Math.round(window.frameGeometry.height),
     },
     noBorder: Boolean(window.noBorder),
 });

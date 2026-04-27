@@ -1,3 +1,6 @@
+# log_level = "error"  # error | warn | info | debug | trace | off (default: error)
+#                        # Override with --log-level CLI flag or RUST_LOG env var.
+
 [[app]]
 name = "dolphin"
 hotkey = "super+f9"

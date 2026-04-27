@@ -2,6 +2,18 @@
 
 The config file is TOML and contains one or more `[[app]]` entries.
 
+## Top-Level Fields
+
+- `log_level`: optional log level. One of `error`, `warn`, `info`, `debug`, `trace`, `off`. Defaults to `error`.
+
+The effective log level is resolved with the following priority (highest first):
+
+1. `RUST_LOG` environment variable
+2. `--log-level <LEVEL>` CLI flag
+3. `-v` / `-vv` CLI flags (`debug` / `trace`)
+4. Config `log_level`
+5. Default `error`
+
 ## Core Fields
 
 - `name`: unique app identifier used internally

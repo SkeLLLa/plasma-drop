@@ -14,6 +14,9 @@ pub struct Cli {
     #[arg(short = 'v', long = "verbose", action = clap::ArgAction::Count)]
     pub verbose: u8,
 
+    #[arg(long = "log-level", value_name = "LEVEL", help = "Override log level (error, warn, info, debug, trace)")]
+    pub log_level: Option<String>,
+
     #[command(subcommand)]
     pub command: Option<Command>,
 }

@@ -65,6 +65,7 @@ pub struct AnimationConfig {
 #[derive(Debug, Clone)]
 pub struct Config {
     pub apps: Vec<AppConfig>,
+    pub log_level: String,
 }
 
 #[derive(Debug, Clone)]
@@ -86,6 +87,7 @@ pub struct AppConfig {
 struct RawConfig {
     #[serde(rename = "app", default)]
     apps: Vec<RawAppConfig>,
+    log_level: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -133,6 +135,19 @@ impl Config {
         if raw.apps.is_empty() {
             bail!("config must contain at least one [[app]] entry");
         }
+
+        let log_level = match raw.log_level.as_deref() {
+            None => "error".to_string(),
+            Some(level) => {
+                let lower = level.trim().to_ascii_lowercase();
+                match lower.as_str() {
+                    "error" | "warn" | "info" | "debug" | "trace" | "off" => lower,
+                    other => bail!(
+                        "invalid log_level '{other}' (expected error/warn/info/debug/trace/off)"
+                    ),
+                }
+            }
+        };
 
         let mut names = HashSet::new();
         let mut hotkeys = HashSet::new();
@@ -212,7 +227,7 @@ impl Config {
             });
         }
 
-        Ok(Self { apps })
+        Ok(Self { apps, log_level })
     }
 }
 
@@ -463,7 +478,10 @@ mod tests {
 
     #[allow(clippy::missing_const_for_fn)]
     fn make_raw(apps: Vec<RawAppConfig>) -> RawConfig {
-        RawConfig { apps }
+        RawConfig {
+            apps,
+            log_level: None,
+        }
     }
 
     fn app(name: &str, hotkey: &str) -> RawAppConfig {

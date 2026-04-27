@@ -57,10 +57,9 @@ async fn main() -> Result<()> {
         }
     }
 
-    init_tracing(cli.verbose);
-
-    let config_path = cli.config.unwrap_or(default_config_path()?);
+    let config_path = cli.config.clone().unwrap_or(default_config_path()?);
     let config = Config::load(&config_path)?;
+    init_tracing(&cli, &config);
     info!("loaded config from {}", config_path.display());
 
     let (kwin, mut hotkey_rx) = KWinClient::connect().await?;
@@ -140,11 +139,15 @@ async fn main() -> Result<()> {
     result
 }
 
-fn init_tracing(verbose: u8) {
-    let level = match verbose {
-        0 => "info",
-        1 => "debug",
-        _ => "trace",
+fn init_tracing(cli: &Cli, config: &Config) {
+    let level = if let Some(explicit) = cli.log_level.as_deref() {
+        explicit.to_string()
+    } else {
+        match cli.verbose {
+            0 => config.log_level.clone(),
+            1 => "debug".to_string(),
+            _ => "trace".to_string(),
+        }
     };
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(level));
     tracing_subscriber::fmt().with_env_filter(filter).init();
