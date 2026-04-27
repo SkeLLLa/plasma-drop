@@ -140,15 +140,14 @@ async fn main() -> Result<()> {
 }
 
 fn init_tracing(cli: &Cli, config: &Config) {
-    let level = if let Some(explicit) = cli.log_level.as_deref() {
-        explicit.to_string()
-    } else {
-        match cli.verbose {
+    let level = cli.log_level.as_deref().map_or_else(
+        || match cli.verbose {
             0 => config.log_level.clone(),
             1 => "debug".to_string(),
             _ => "trace".to_string(),
-        }
-    };
+        },
+        ToString::to_string,
+    );
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(level));
     tracing_subscriber::fmt().with_env_filter(filter).init();
 }
