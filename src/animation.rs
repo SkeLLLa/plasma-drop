@@ -1,5 +1,4 @@
 use crate::config::{AnimationConfig, AnimationEasing, AnimationStyle};
-use crate::screen::ScreenInfo;
 use crate::wm::FrameGeometry;
 
 const FRAME_INTERVAL_MS: u16 = 16;
@@ -40,15 +39,14 @@ enum KeyframeTrack {
 impl TransitionPlan {
     pub fn from_config(
         config: &AnimationConfig,
-        screen: &ScreenInfo,
         visible: &FrameGeometry,
+        hidden: &FrameGeometry,
         phase: TransitionPhase,
     ) -> Option<Self> {
         if matches!(config.style, AnimationStyle::None) || config.duration_ms == 0 {
             return None;
         }
 
-        let hidden = screen.hidden_rect_for(visible);
         let mut setup = WindowState {
             geometry: None,
             opacity: None,
@@ -64,7 +62,7 @@ impl TransitionPlan {
                 if uses_geometry_track(config.style) {
                     setup.geometry = Some(hidden.clone());
                     keyframes.push(KeyframeTrack::Geometry {
-                        from: hidden,
+                        from: hidden.clone(),
                         to: visible.clone(),
                     });
                 } else {
@@ -93,7 +91,7 @@ impl TransitionPlan {
                 }
 
                 if !uses_geometry_track(config.style) {
-                    teardown.geometry = Some(hidden);
+                    teardown.geometry = Some(hidden.clone());
                 }
             }
         }
@@ -191,24 +189,21 @@ fn ease(progress: f64, easing: AnimationEasing) -> f64 {
 mod tests {
     use super::{TransitionPhase, TransitionPlan};
     use crate::config::{AnimationConfig, AnimationEasing, AnimationStyle};
-    use crate::screen::ScreenInfo;
     use crate::wm::FrameGeometry;
-
-    fn screen() -> ScreenInfo {
-        ScreenInfo {
-            index: 0,
-            name: "screen".into(),
-            x: 0,
-            y: 0,
-            width: 1920,
-            height: 1080,
-        }
-    }
 
     const fn visible() -> FrameGeometry {
         FrameGeometry {
             x: 960,
             y: 0,
+            width: 960,
+            height: 1080,
+        }
+    }
+
+    const fn hidden() -> FrameGeometry {
+        FrameGeometry {
+            x: 960,
+            y: -1080,
             width: 960,
             height: 1080,
         }
@@ -222,8 +217,8 @@ mod tests {
                 easing: AnimationEasing::EaseOut,
                 duration_ms: 160,
             },
-            &screen(),
             &visible(),
+            &hidden(),
             TransitionPhase::Show,
         )
         .unwrap();
@@ -241,8 +236,8 @@ mod tests {
                 easing: AnimationEasing::EaseInOut,
                 duration_ms: 160,
             },
-            &screen(),
             &visible(),
+            &hidden(),
             TransitionPhase::Hide,
         )
         .unwrap();
@@ -261,8 +256,8 @@ mod tests {
                 easing: AnimationEasing::Linear,
                 duration_ms: 1000,
             },
-            &screen(),
             &visible(),
+            &hidden(),
             TransitionPhase::Show,
         );
 

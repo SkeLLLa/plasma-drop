@@ -2,10 +2,10 @@ use crate::wm::kwin::proxies::{
     KGlobalAccelComponentProxy, KGlobalAccelProxy, KWinProxy, KWinScriptingProxy,
 };
 use crate::wm::kwin::types::{
-    CommandEnvelope, ResponseEnvelope, SupportInformationResponse, WindowListResponse,
-    WindowResponse,
+    CommandEnvelope, CursorPositionResponse, ResponseEnvelope, SupportInformationResponse,
+    WindowListResponse, WindowResponse,
 };
-use crate::wm::{FrameGeometry, HOTKEY_PREFIX, ManagedWindow, WindowManager};
+use crate::wm::{FrameGeometry, HOTKEY_PREFIX, ManagedWindow, Point, WindowManager};
 use anyhow::{Context, Result, anyhow, bail};
 use async_trait::async_trait;
 use serde::de::DeserializeOwned;
@@ -236,6 +236,17 @@ impl KWinClient {
         Ok(response.window)
     }
 
+    pub async fn get_active_window(&self) -> Result<Option<ManagedWindow>> {
+        let response: WindowResponse = self.send_command("GET_ACTIVE_WINDOW", json!({})).await?;
+        Ok(response.window)
+    }
+
+    pub async fn get_cursor_position(&self) -> Result<Option<Point>> {
+        let response: CursorPositionResponse =
+            self.send_command("GET_CURSOR_POSITION", json!({})).await?;
+        Ok(response.position)
+    }
+
     pub async fn move_window(&self, internal_id: &str, geometry: &FrameGeometry) -> Result<()> {
         self.send_command::<Value>(
             "MOVE_WINDOW",
@@ -340,6 +351,14 @@ impl WindowManager for KWinClient {
 
     async fn get_window(&self, internal_id: &str) -> Result<Option<ManagedWindow>> {
         Self::get_window(self, internal_id).await
+    }
+
+    async fn get_active_window(&self) -> Result<Option<ManagedWindow>> {
+        Self::get_active_window(self).await
+    }
+
+    async fn get_cursor_position(&self) -> Result<Option<Point>> {
+        Self::get_cursor_position(self).await
     }
 
     async fn move_window(&self, internal_id: &str, geometry: &FrameGeometry) -> Result<()> {

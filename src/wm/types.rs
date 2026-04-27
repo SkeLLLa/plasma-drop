@@ -11,6 +11,12 @@ pub struct FrameGeometry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Point {
+    pub x: i32,
+    pub y: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ManagedWindow {
     #[serde(rename = "internalId")]
     pub internal_id: String,

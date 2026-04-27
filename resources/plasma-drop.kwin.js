@@ -114,6 +114,22 @@ cmds["GET_WINDOW"] = (params) => ({
         return window ? mapWindow(window) : null;
     })(),
 });
+cmds["GET_ACTIVE_WINDOW"] = () => ({
+    window: (() => {
+        const window = kwin.getActiveWindow();
+        return window ? mapWindow(window) : null;
+    })(),
+});
+cmds["GET_CURSOR_POSITION"] = () => ({
+    position: (() => {
+        const position =
+            typeof workspace.cursorPos === "function" ? workspace.cursorPos() : workspace.cursorPos;
+        if (!position || typeof position.x !== "number" || typeof position.y !== "number") {
+            return null;
+        }
+        return { x: position.x, y: position.y };
+    })(),
+});
 cmds["GET_SUPPORT_INFORMATION"] = () => ({
     text: workspace.supportInformation(),
 });

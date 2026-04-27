@@ -72,22 +72,15 @@ async fn main() -> Result<()> {
 
     kwin.cleanup_shortcuts().await?;
 
-    let screen_info = {
+    let screens = {
         let text = kwin.get_support_information_text().await?;
-        let screens = parse_support_information(&text)?;
-        screens
-            .into_iter()
-            .find(|screen| screen.index == 0)
-            .context("screen 0 not found in KWin support information")?
+        parse_support_information(&text)?
     };
-    info!(
-        "using screen 0 '{}' at {},{} {}x{}",
-        screen_info.name, screen_info.x, screen_info.y, screen_info.width, screen_info.height
-    );
-    for app in &config.apps {
-        screen_info
-            .validate_placement(&app.placement)
-            .with_context(|| format!("invalid placement for '{}'", app.name))?;
+    for screen in &screens {
+        info!(
+            "detected screen {} '{}' at {},{} {}x{}",
+            screen.index, screen.name, screen.x, screen.y, screen.width, screen.height
+        );
     }
 
     let managed_apps = build_registry_entries(&config);
@@ -108,7 +101,7 @@ async fn main() -> Result<()> {
     let registry = Arc::new(Mutex::new(AppRegistry::new(managed_apps)));
 
     let kwin = Arc::new(kwin);
-    let toggle_service = ToggleService::new(registry.clone(), kwin.clone(), screen_info);
+    let toggle_service = ToggleService::new(registry.clone(), kwin.clone(), screens);
 
     let result = loop {
         tokio::select! {

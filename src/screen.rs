@@ -35,6 +35,23 @@ pub struct ScreenInfo {
 }
 
 impl ScreenInfo {
+    pub const fn contains_point(&self, x: i32, y: i32) -> bool {
+        x >= self.x && x < self.x + self.width && y >= self.y && y < self.y + self.height
+    }
+
+    pub fn overlap_area(&self, rect: &FrameGeometry) -> i64 {
+        let left = self.x.max(rect.x);
+        let top = self.y.max(rect.y);
+        let right = (self.x + self.width).min(rect.x + rect.width);
+        let bottom = (self.y + self.height).min(rect.y + rect.height);
+
+        if right <= left || bottom <= top {
+            return 0;
+        }
+
+        i64::from(right - left) * i64::from(bottom - top)
+    }
+
     pub fn placement_rect(&self, placement: &PlacementConfig) -> FrameGeometry {
         let width = Self::resolve_metric(&placement.width, self.width);
         let height = Self::resolve_metric(&placement.height, self.height);
@@ -74,18 +91,6 @@ impl ScreenInfo {
             y,
             width,
             height,
-        }
-    }
-
-    // Parks window above top edge of target screen. Multi-monitor stacks with a
-    // screen directly above will see the parked window overlap that screen.
-    // Revisit when monitor-selection policy lands.
-    pub const fn hidden_rect_for(&self, visible: &FrameGeometry) -> FrameGeometry {
-        FrameGeometry {
-            x: visible.x,
-            y: self.y - visible.height,
-            width: visible.width,
-            height: visible.height,
         }
     }
 
@@ -147,6 +152,21 @@ impl ScreenInfo {
     }
 }
 
+pub fn hidden_rect_for_screens(screens: &[ScreenInfo], visible: &FrameGeometry) -> FrameGeometry {
+    let top = screens
+        .iter()
+        .map(|screen| screen.y)
+        .min()
+        .unwrap_or(visible.y);
+
+    FrameGeometry {
+        x: visible.x,
+        y: top - visible.height,
+        width: visible.width,
+        height: visible.height,
+    }
+}
+
 pub fn parse_support_information(text: &str) -> Result<Vec<ScreenInfo>> {
     let mut screens = Vec::new();
 
@@ -182,7 +202,7 @@ pub fn parse_support_information(text: &str) -> Result<Vec<ScreenInfo>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ScreenInfo, parse_support_information};
+    use super::{ScreenInfo, hidden_rect_for_screens, parse_support_information};
     use crate::config::{PlacementConfig, PlacementMetric, PlacementPosition};
     use crate::wm::FrameGeometry;
 
@@ -459,8 +479,18 @@ Name: eDP-1
     }
 
     #[test]
-    fn computes_hidden_rect_from_visible_rect() {
-        let screen = screen();
+    fn computes_hidden_rect_above_virtual_desktop() {
+        let screens = vec![
+            screen(),
+            ScreenInfo {
+                index: 1,
+                name: "top".into(),
+                x: 0,
+                y: -1080,
+                width: 1920,
+                height: 1080,
+            },
+        ];
         let visible = FrameGeometry {
             x: 640,
             y: 0,
@@ -468,10 +498,10 @@ Name: eDP-1
             height: 720,
         };
 
-        let hidden = screen.hidden_rect_for(&visible);
+        let hidden = hidden_rect_for_screens(&screens, &visible);
         assert_eq!(
             (hidden.x, hidden.y, hidden.width, hidden.height),
-            (640, -720, 1280, 720)
+            (640, -1800, 1280, 720)
         );
     }
 }

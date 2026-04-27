@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::wm::ManagedWindow;
+use crate::wm::{ManagedWindow, Point};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CommandEnvelope {
@@ -31,6 +31,11 @@ pub struct WindowListResponse {
 #[derive(Debug, Clone, Deserialize)]
 pub struct WindowResponse {
     pub window: Option<ManagedWindow>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CursorPositionResponse {
+    pub position: Option<Point>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
