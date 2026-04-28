@@ -19,7 +19,7 @@ fn screen_name_re() -> &'static Regex {
 fn screen_geometry_re() -> &'static Regex {
     static SCREEN_GEOMETRY_RE: OnceLock<Regex> = OnceLock::new();
     SCREEN_GEOMETRY_RE.get_or_init(|| {
-        Regex::new(r"(?im)^Geometry: (\d+),(\d+),(\d+)x(\d+)$")
+        Regex::new(r"(?im)^Geometry: (-?\d+),(-?\d+),(\d+)x(\d+)$")
             .expect("valid screen geometry regex")
     })
 }
@@ -240,6 +240,18 @@ Name: eDP-1
     fn rejects_when_no_screens_exist() {
         let error = parse_support_information("Name: eDP-1").unwrap_err();
         assert!(error.to_string().contains("no screens found"));
+    }
+
+    #[test]
+    fn parses_negative_screen_coordinates() {
+        let text = "\
+Screen 0:
+Name: HDMI-1
+Geometry: -1920,-1080,1920x1080
+";
+
+        let screens = parse_support_information(text).unwrap();
+        assert_eq!((screens[0].x, screens[0].y), (-1920, -1080));
     }
 
     fn screen() -> ScreenInfo {

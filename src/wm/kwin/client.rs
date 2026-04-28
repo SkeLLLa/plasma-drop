@@ -292,7 +292,7 @@ impl KWinClient {
         Ok(())
     }
 
-    pub async fn get_support_information_text(&self) -> Result<String> {
+    pub async fn support_information_text(&self) -> Result<String> {
         let response: SupportInformationResponse = self
             .send_command("GET_SUPPORT_INFORMATION", json!({}))
             .await?;
@@ -359,6 +359,10 @@ impl WindowManager for KWinClient {
 
     async fn get_cursor_position(&self) -> Result<Option<Point>> {
         Self::get_cursor_position(self).await
+    }
+
+    async fn get_support_information_text(&self) -> Result<Option<String>> {
+        Self::support_information_text(self).await.map(Some)
     }
 
     async fn move_window(&self, internal_id: &str, geometry: &FrameGeometry) -> Result<()> {

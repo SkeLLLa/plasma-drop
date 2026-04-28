@@ -1,7 +1,7 @@
 use crate::animation::{TransitionPhase, TransitionPlan, WindowState};
 use crate::app_registry::AppRegistry;
 use crate::config::{AppConfig, AttachMode};
-use crate::screen::{ScreenInfo, hidden_rect_for_screens};
+use crate::screen::{ScreenInfo, hidden_rect_for_screens, parse_support_information};
 use crate::wm::{FrameGeometry, ManagedWindow, Point, WindowManager, find_best_match};
 use anyhow::{Context, Result, bail};
 use std::collections::HashMap;
@@ -30,7 +30,7 @@ fn require_app<'r>(
 pub struct ToggleService {
     registry: Arc<Mutex<AppRegistry>>,
     kwin: Arc<dyn WindowManager>,
-    screens: Vec<ScreenInfo>,
+    screens: Arc<Mutex<Vec<ScreenInfo>>>,
     recent_hotkeys: Arc<Mutex<HashMap<String, Instant>>>,
     pending_spawns: Arc<Mutex<HashMap<String, Instant>>>,
 }
@@ -48,7 +48,7 @@ impl ToggleService {
         Self {
             registry,
             kwin,
-            screens,
+            screens: Arc::new(Mutex::new(screens)),
             recent_hotkeys: Arc::new(Mutex::new(HashMap::new())),
             pending_spawns: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -92,7 +92,7 @@ impl ToggleService {
         let screen_for_show = if target_visible {
             None
         } else {
-            Some(self.current_screen().await?.clone())
+            Some(self.current_screen().await?)
         };
 
         if let Some(other) = other_visible {
@@ -151,7 +151,8 @@ impl ToggleService {
             .validate_placement(&config.placement)
             .with_context(|| format!("invalid placement for '{app_name}'"))?;
         let visible_rect = screen.placement_rect(&config.placement);
-        let hidden_rect = hidden_rect_for_screens(&self.screens, &visible_rect);
+        let screens = self.current_screens().await;
+        let hidden_rect = hidden_rect_for_screens(&screens, &visible_rect);
         if let Some(plan) = TransitionPlan::from_config(
             &config.animation,
             &visible_rect,
@@ -193,9 +194,10 @@ impl ToggleService {
             .resolve_existing_window(&config, tracked_window_id)
             .await?;
         if let Some(window) = resolved_window {
-            let screen = self.screen_for_window(&window);
+            let screens = self.current_screens().await;
+            let screen = Self::screen_for_window(&screens, &window);
             let visible_rect = screen.placement_rect(&config.placement);
-            let hidden_rect = hidden_rect_for_screens(&self.screens, &visible_rect);
+            let hidden_rect = hidden_rect_for_screens(&screens, &visible_rect);
             if let Some(plan) = TransitionPlan::from_config(
                 &config.animation,
                 &visible_rect,
@@ -282,35 +284,64 @@ impl ToggleService {
         Ok(())
     }
 
-    async fn current_screen(&self) -> Result<&ScreenInfo> {
+    async fn current_screens(&self) -> Vec<ScreenInfo> {
+        match self.kwin.get_support_information_text().await {
+            Ok(Some(text)) => match parse_support_information(&text) {
+                Ok(screens) => {
+                    self.screens.lock().await.clone_from(&screens);
+                    screens
+                }
+                Err(error) => {
+                    warn!(
+                        "failed to parse refreshed screen information; using cached screens: {error:#}"
+                    );
+                    self.screens.lock().await.clone()
+                }
+            },
+            Ok(None) => self.screens.lock().await.clone(),
+            Err(error) => {
+                warn!("failed to refresh screen information; using cached screens: {error:#}");
+                self.screens.lock().await.clone()
+            }
+        }
+    }
+
+    async fn current_screen(&self) -> Result<ScreenInfo> {
+        let screens = self.current_screens().await;
         if let Some(position) = self.kwin.get_cursor_position().await? {
-            if let Some(screen) = self.screen_containing_point(&position) {
-                return Ok(screen);
+            if let Some(screen) = Self::screen_containing_point(&screens, &position) {
+                return Ok(screen.clone());
             }
         }
 
         if let Some(window) = self.kwin.get_active_window().await? {
-            return Ok(self.screen_for_geometry(&window.frame_geometry));
+            return Ok(Self::screen_for_geometry(&screens, &window.frame_geometry).clone());
         }
 
-        Ok(&self.screens[0])
+        Ok(screens[0].clone())
     }
 
-    fn screen_for_window(&self, window: &ManagedWindow) -> &ScreenInfo {
-        self.screen_for_geometry(&window.frame_geometry)
+    fn screen_for_window<'a>(screens: &'a [ScreenInfo], window: &ManagedWindow) -> &'a ScreenInfo {
+        Self::screen_for_geometry(screens, &window.frame_geometry)
     }
 
-    fn screen_containing_point(&self, position: &Point) -> Option<&ScreenInfo> {
-        self.screens
+    fn screen_containing_point<'a>(
+        screens: &'a [ScreenInfo],
+        position: &Point,
+    ) -> Option<&'a ScreenInfo> {
+        screens
             .iter()
             .find(|screen| screen.contains_point(position.x, position.y))
     }
 
-    fn screen_for_geometry(&self, geometry: &FrameGeometry) -> &ScreenInfo {
-        self.screens
+    fn screen_for_geometry<'a>(
+        screens: &'a [ScreenInfo],
+        geometry: &FrameGeometry,
+    ) -> &'a ScreenInfo {
+        screens
             .iter()
             .max_by_key(|screen| screen.overlap_area(geometry))
-            .unwrap_or(&self.screens[0])
+            .unwrap_or(&screens[0])
     }
 
     async fn hide_window_decorations(&self, app_name: &str, window: &ManagedWindow) -> Result<()> {
@@ -575,6 +606,7 @@ mod tests {
         active_window: Mutex<Option<ManagedWindow>>,
         cursor_position: Mutex<Option<Point>>,
         windows: Mutex<Vec<ManagedWindow>>,
+        support_information: Mutex<Option<String>>,
     }
 
     #[async_trait]
@@ -593,6 +625,10 @@ mod tests {
 
         async fn get_cursor_position(&self) -> Result<Option<Point>> {
             Ok(self.cursor_position.lock().await.clone())
+        }
+
+        async fn get_support_information_text(&self) -> Result<Option<String>> {
+            Ok(self.support_information.lock().await.clone())
         }
 
         async fn move_window(&self, internal_id: &str, geometry: &FrameGeometry) -> Result<()> {
@@ -721,6 +757,40 @@ mod tests {
         ]
     }
 
+    fn divided_stale_screens() -> Vec<ScreenInfo> {
+        vec![
+            ScreenInfo {
+                index: 0,
+                name: "main-top".into(),
+                x: 0,
+                y: 0,
+                width: 1920,
+                height: 1080,
+            },
+            ScreenInfo {
+                index: 1,
+                name: "main-bottom".into(),
+                x: 0,
+                y: 1080,
+                width: 1920,
+                height: 120,
+            },
+        ]
+    }
+
+    fn support_information(screens: &[ScreenInfo]) -> String {
+        screens
+            .iter()
+            .map(|screen| {
+                format!(
+                    "Screen {}:\nName: {}\nGeometry: {},{},{}x{}\n",
+                    screen.index, screen.name, screen.x, screen.y, screen.width, screen.height
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     fn mock_kwin(window: Option<ManagedWindow>) -> Arc<MockKWin> {
         Arc::new(MockKWin {
             calls: Mutex::new(Vec::new()),
@@ -728,6 +798,7 @@ mod tests {
             active_window: Mutex::new(None),
             cursor_position: Mutex::new(None),
             windows: Mutex::new(Vec::new()),
+            support_information: Mutex::new(None),
         })
     }
 
@@ -777,6 +848,40 @@ mod tests {
             vec![
                 "move:{abc}:0:-1080:1920:1080".to_string(),
                 "resize:{abc}:0:-1080:1920:1080".to_string(),
+                "foreground:{abc}".to_string()
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn toggle_on_refreshes_screens_after_external_display_disconnect() {
+        let managed = managed_app(app("dolphin", "super+f9", "dolphin"), "{abc}", false);
+        let registry = Arc::new(Mutex::new(AppRegistry::new(vec![managed])));
+        let kwin = mock_kwin(Some(window(
+            "{abc}",
+            "dolphin",
+            "Dolphin",
+            geometry(10, 20, 300, 400),
+        )));
+        *kwin.cursor_position.lock().await = Some(Point { x: 500, y: 1100 });
+        *kwin.support_information.lock().await = Some(support_information(&[ScreenInfo {
+            index: 0,
+            name: "main".into(),
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1200,
+        }]));
+        let service = ToggleService::new(registry, kwin.clone(), divided_stale_screens());
+
+        service.toggle_app("dolphin").await.unwrap();
+
+        let calls = kwin.calls.lock().await.clone();
+        assert_eq!(
+            calls,
+            vec![
+                "move:{abc}:0:0:1920:1200".to_string(),
+                "resize:{abc}:0:0:1920:1200".to_string(),
                 "foreground:{abc}".to_string()
             ]
         );
@@ -1058,6 +1163,7 @@ mod tests {
             active_window: Mutex::new(None),
             cursor_position: Mutex::new(None),
             windows: Mutex::new(vec![current_window]),
+            support_information: Mutex::new(None),
         });
         let service = ToggleService::new(registry.clone(), kwin.clone(), vec![screen()]);
 
@@ -1093,6 +1199,7 @@ mod tests {
             active_window: Mutex::new(None),
             cursor_position: Mutex::new(None),
             windows: Mutex::new(Vec::new()),
+            support_information: Mutex::new(None),
         });
         let service = ToggleService::new(registry.clone(), kwin, vec![screen()]);
 

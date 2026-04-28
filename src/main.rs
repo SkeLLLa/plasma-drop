@@ -72,7 +72,7 @@ async fn main() -> Result<()> {
     kwin.cleanup_shortcuts().await?;
 
     let screens = {
-        let text = kwin.get_support_information_text().await?;
+        let text = kwin.support_information_text().await?;
         parse_support_information(&text)?
     };
     for screen in &screens {
