@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.3](https://github.com/SkeLLLa/plasma-drop/compare/v1.5.2...v1.5.3) - 2026-04-28
+
+### Fixed
+
+- geometry helper after plug-unplug external monitors
+
 ## [1.5.2](https://github.com/SkeLLLa/plasma-drop/compare/v1.5.1...v1.5.2) - 2026-04-27
 
 ### Fixed
