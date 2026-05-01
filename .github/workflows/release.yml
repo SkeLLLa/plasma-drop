@@ -234,7 +234,7 @@ jobs:
 
       - name: Upload package repository inputs
         if: ${{ steps.release-plz.outputs.released == 'true' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: package-repository-inputs
           retention-days: 1
@@ -259,7 +259,7 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Download current package artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: package-repository-inputs
           path: target/release-assets
@@ -407,13 +407,13 @@ jobs:
           gzip -cd public/deb/dists/stable/main/binary-amd64/Packages.gz | grep -q '^Package: plasma-drop$'
 
       - name: Configure GitHub Pages
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v6
 
       - name: Upload GitHub Pages artifact
-        uses: actions/upload-pages-artifact@v4
+        uses: actions/upload-pages-artifact@v5
         with:
           path: public
 
       - name: Deploy GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
