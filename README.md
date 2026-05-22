@@ -22,9 +22,9 @@ If you need a GUI, a Windows version, or a broader configuration surface, use th
 ## Demo
 
 <p align="center">
-  <a href="https://github.com/user-attachments/assets/dbfbf9c8-ea90-4d26-ac43-279864756e5a">
+  <video src="https://github.com/user-attachments/assets/dbfbf9c8-ea90-4d26-ac43-279864756e5a" controls poster="https://github.com/user-attachments/assets/5eacbb37-b803-4998-ba2f-235818dec1f5" width="720">
     <img src="https://github.com/user-attachments/assets/5eacbb37-b803-4998-ba2f-235818dec1f5" alt="plasma-drop demo" width="720" height="450">
-  </a>
+  </video>
 </p>
 
 ## Requirements
