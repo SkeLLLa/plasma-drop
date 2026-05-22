@@ -19,6 +19,14 @@ the config.
 It is heavily inspired by [windows-terminal-quake](https://github.com/flyingpie/windows-terminal-quake).
 If you need a GUI, a Windows version, or a broader configuration surface, use that app.
 
+## Demo
+
+<p align="center">
+  <a href="https://github.com/user-attachments/assets/dbfbf9c8-ea90-4d26-ac43-279864756e5a">
+    <img src="https://github.com/user-attachments/assets/5eacbb37-b803-4998-ba2f-235818dec1f5" alt="plasma-drop demo" width="720" height="450">
+  </a>
+</p>
+
 ## Requirements
 
 - Linux desktop session
