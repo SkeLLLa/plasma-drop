@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.4](https://github.com/SkeLLLa/plasma-drop/compare/v1.5.3...v1.5.4) - 2026-05-22
+
+### Fixed
+
+- *(deps)* bump tokio from 1.52.1 to 1.52.3
+
 ## [1.5.3](https://github.com/SkeLLLa/plasma-drop/compare/v1.5.2...v1.5.3) - 2026-04-28
 
 ### Fixed
