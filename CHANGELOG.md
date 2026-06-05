@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.8](https://github.com/SkeLLLa/plasma-drop/compare/v1.5.7...v1.5.8) - 2026-06-05
+
+### Fixed
+
+- *(deps)* bump uuid from 1.23.1 to 1.23.2 in the all-minor-patch group
+
 ## [1.5.7](https://github.com/SkeLLLa/plasma-drop/compare/v1.5.6...v1.5.7) - 2026-05-22
 
 ### Other
