@@ -25,7 +25,7 @@ jobs:
     name: Rust quality (stable)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Install stable Rust with clippy and rustfmt
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -39,7 +39,7 @@ jobs:
     name: MSRV build (1.85)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Install MSRV toolchain
         uses: dtolnay/rust-toolchain@master
         with:
@@ -61,7 +61,7 @@ jobs:
       issues: write
       checks: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Audit dependencies
         uses: rustsec/audit-check@v2
         with:
