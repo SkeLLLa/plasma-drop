@@ -62,7 +62,7 @@ jobs:
         uses: rust-lang/crates-io-auth-action@v1
 
       - name: Install release-plz
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@v2.85.3
         with:
           tool: release-plz
 
