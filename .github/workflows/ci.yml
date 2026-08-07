@@ -19,7 +19,7 @@ jobs:
       pull-requests: read
     steps:
       - name: Verify Conventional Commit messages
-        uses: opensource-nepal/commitlint@v1
+        uses: opensource-nepal/commitlint@v2
 
   rust-quality:
     name: Rust quality (stable)
