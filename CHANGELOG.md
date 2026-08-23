@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.10](https://github.com/SkeLLLa/plasma-drop/compare/v1.5.9...v1.5.10) - 2026-08-23
+
+### Other
+
+- update Cargo.lock dependencies
+
 ## [1.5.9](https://github.com/SkeLLLa/plasma-drop/compare/v1.5.8...v1.5.9) - 2026-07-04
 
 ### Other
