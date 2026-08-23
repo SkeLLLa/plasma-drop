@@ -40,10 +40,6 @@ impl Hotkey {
             .filter(|token| !token.is_empty())
             .collect();
 
-        if tokens.len() < 2 {
-            bail!("hotkey '{raw}' must contain at least one modifier and one key");
-        }
-
         let mut seen = HashSet::new();
         let mut modifiers = Vec::new();
         for token in &tokens[..tokens.len() - 1] {
@@ -141,5 +137,11 @@ mod tests {
     #[test]
     fn rejects_empty() {
         assert!(Hotkey::parse("").is_err());
+    }
+
+    #[test]
+    fn parses_single_key() {
+        let hotkey = Hotkey::parse("F12").unwrap();
+        assert_eq!(hotkey.sequence(), "F12");
     }
 }
