@@ -82,6 +82,7 @@ Each app may also define an optional animation block:
 style = "slide-fade"
 easing = "ease-out"
 duration_ms = 180
+frame_delay_ms = 8
 ```
 
 Supported values:
@@ -89,12 +90,14 @@ Supported values:
 - `style`: `none`, `slide`, `fade`, or `slide-fade`
 - `easing`: `linear`, `ease-out`, or `ease-in-out`
 - `duration_ms`: integer duration from `0` to `2000`
+- `frame_delay_ms`: positive delay between frames in milliseconds; use a lower value for higher refresh rate screens
 
 Defaults:
 
 - `style = "none"`
 - `easing = "ease-out"`
 - `duration_ms = 150`
+- `frame_delay_ms = 16`
 
 Current status:
 

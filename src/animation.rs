@@ -1,7 +1,6 @@
 use crate::config::{AnimationConfig, AnimationEasing, AnimationStyle};
 use crate::wm::FrameGeometry;
-
-const FRAME_INTERVAL_MS: u16 = 16;
+use std::time::Duration;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct WindowState {
@@ -18,6 +17,7 @@ pub enum TransitionPhase {
 #[derive(Debug, Clone, PartialEq)]
 pub struct TransitionPlan {
     duration_ms: u16,
+    frame_delay_ms: u16,
     easing: AnimationEasing,
     setup: WindowState,
     keyframes: Vec<KeyframeTrack>,
@@ -98,6 +98,7 @@ impl TransitionPlan {
 
         Some(Self {
             duration_ms: config.duration_ms,
+            frame_delay_ms: config.frame_delay_ms,
             easing: config.easing,
             setup,
             keyframes,
@@ -114,7 +115,11 @@ impl TransitionPlan {
     }
 
     pub fn frame_count(&self) -> u16 {
-        self.duration_ms.div_ceil(FRAME_INTERVAL_MS).max(1)
+        self.duration_ms.div_ceil(self.frame_delay_ms).max(1)
+    }
+
+    pub fn frame_delay(&self) -> Duration {
+        Duration::from_millis(u64::from(self.frame_delay_ms))
     }
 
     pub fn frame_state(&self, frame_index: u16) -> WindowState {
@@ -216,6 +221,7 @@ mod tests {
                 style: AnimationStyle::Slide,
                 easing: AnimationEasing::EaseOut,
                 duration_ms: 160,
+                frame_delay_ms: 8,
             },
             &visible(),
             &hidden(),
@@ -223,6 +229,7 @@ mod tests {
         )
         .unwrap();
 
+        assert_eq!(plan.frame_count(), 20);
         assert_eq!(plan.setup_state().geometry.unwrap().y, -1080);
         assert_eq!(plan.setup_state().opacity, None);
         assert_eq!(plan.final_state().geometry.unwrap(), visible());
@@ -235,6 +242,7 @@ mod tests {
                 style: AnimationStyle::Fade,
                 easing: AnimationEasing::EaseInOut,
                 duration_ms: 160,
+                frame_delay_ms: 16,
             },
             &visible(),
             &hidden(),
@@ -255,6 +263,7 @@ mod tests {
                 style: AnimationStyle::None,
                 easing: AnimationEasing::Linear,
                 duration_ms: 1000,
+                frame_delay_ms: 16,
             },
             &visible(),
             &hidden(),

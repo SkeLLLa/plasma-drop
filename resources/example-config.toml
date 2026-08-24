@@ -17,6 +17,8 @@ position = "left"
 style = "slide"
 easing = "ease-out"
 duration_ms = 1000
+# Set lower for higher refresh rate screens, e.g. 8 for 120 Hz.
+frame_delay_ms = 8
 
 [[app]]
 name = "kate"

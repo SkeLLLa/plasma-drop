@@ -1,5 +1,5 @@
 use crate::hotkey::Hotkey;
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use regex::Regex;
 use serde::Deserialize;
 use std::collections::HashSet;
@@ -60,6 +60,7 @@ pub struct AnimationConfig {
     pub style: AnimationStyle,
     pub easing: AnimationEasing,
     pub duration_ms: u16,
+    pub frame_delay_ms: u16,
 }
 
 #[derive(Debug, Clone)]
@@ -120,6 +121,7 @@ struct RawAnimationConfig {
     style: Option<String>,
     easing: Option<String>,
     duration_ms: Option<u16>,
+    frame_delay_ms: Option<u16>,
 }
 
 impl Config {
@@ -340,15 +342,20 @@ impl AnimationConfig {
         let style = AnimationStyle::parse(app_name, raw.style.as_deref().unwrap_or("none"))?;
         let easing = AnimationEasing::parse(app_name, raw.easing.as_deref().unwrap_or("ease-out"))?;
         let duration_ms = raw.duration_ms.unwrap_or(150);
+        let frame_delay_ms = raw.frame_delay_ms.unwrap_or(16);
 
         if duration_ms > 2_000 {
             bail!("app '{app_name}' has animation.duration_ms larger than 2000: '{duration_ms}'");
+        }
+        if frame_delay_ms == 0 {
+            bail!("app '{app_name}' has animation.frame_delay_ms that must be greater than 0");
         }
 
         Ok(Self {
             style,
             easing,
             duration_ms,
+            frame_delay_ms,
         })
     }
 }
@@ -371,6 +378,7 @@ impl Default for AnimationConfig {
             style: AnimationStyle::None,
             easing: AnimationEasing::EaseOut,
             duration_ms: 150,
+            frame_delay_ms: 16,
         }
     }
 }
@@ -719,12 +727,14 @@ mod tests {
             style: Some("slide-fade".into()),
             easing: Some("ease-in-out".into()),
             duration_ms: Some(220),
+            frame_delay_ms: Some(8),
         });
 
         let config = Config::from_raw(make_raw(vec![raw])).unwrap();
         assert_eq!(config.apps[0].animation.style, AnimationStyle::SlideFade);
         assert_eq!(config.apps[0].animation.easing, AnimationEasing::EaseInOut);
         assert_eq!(config.apps[0].animation.duration_ms, 220);
+        assert_eq!(config.apps[0].animation.frame_delay_ms, 8);
     }
 
     #[test]
@@ -734,6 +744,7 @@ mod tests {
             style: Some("bounce".into()),
             easing: None,
             duration_ms: None,
+            frame_delay_ms: None,
         });
 
         let err = Config::from_raw(make_raw(vec![raw])).unwrap_err();
@@ -747,12 +758,28 @@ mod tests {
             style: Some("slide".into()),
             easing: None,
             duration_ms: Some(2_001),
+            frame_delay_ms: None,
         });
 
         let err = Config::from_raw(make_raw(vec![raw])).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("animation.duration_ms larger than 2000")
-        );
+        assert!(err
+            .to_string()
+            .contains("animation.duration_ms larger than 2000"));
+    }
+
+    #[test]
+    fn rejects_zero_animation_frame_delay() {
+        let mut raw = app("terminal", "ctrl+grave");
+        raw.animation = Some(super::RawAnimationConfig {
+            style: Some("slide".into()),
+            easing: None,
+            duration_ms: None,
+            frame_delay_ms: Some(0),
+        });
+
+        let err = Config::from_raw(make_raw(vec![raw])).unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("animation.frame_delay_ms that must be greater than 0"));
     }
 }

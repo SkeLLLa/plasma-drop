@@ -2,7 +2,7 @@
 name = "plasma-drop"
 version = "1.5.11"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.88"
 description = "KDE Plasma 6 dropdown app launcher"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/SkeLLLa/plasma-drop"
@@ -61,7 +61,15 @@ regex = "1.11"
 libc = "0.2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-tokio = { version = "1.52", features = ["fs", "macros", "process", "rt-multi-thread", "signal", "sync", "time"] }
+tokio = { version = "1.52", features = [
+  "fs",
+  "macros",
+  "process",
+  "rt-multi-thread",
+  "signal",
+  "sync",
+  "time",
+] }
 toml = "1.1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
@@ -80,13 +88,41 @@ The package installs the binary, a user systemd unit, and an example
 configuration so users can enable the service with minimal setup.
 """
 assets = [
-  ["target/release/plasma-drop", "usr/bin/plasma-drop", "755"],
-  ["packaging/systemd/plasma-drop.packaged.service", "usr/lib/systemd/user/plasma-drop.service", "644"],
-  ["resources/example-config.toml", "usr/share/plasma-drop/examples/config.toml", "644"],
-  ["README.md", "usr/share/doc/plasma-drop/README.md", "644"],
-  ["resources/icons/plasma-drop-icon.svg", "usr/share/doc/plasma-drop/resources/icons/plasma-drop-icon.svg", "644"],
-  ["resources/icons/plasma-drop-icon.png", "usr/share/doc/plasma-drop/resources/icons/plasma-drop-icon.png", "644"],
-  ["COPYING", "usr/share/doc/plasma-drop/COPYING", "644"],
+  [
+    "target/release/plasma-drop",
+    "usr/bin/plasma-drop",
+    "755",
+  ],
+  [
+    "packaging/systemd/plasma-drop.packaged.service",
+    "usr/lib/systemd/user/plasma-drop.service",
+    "644",
+  ],
+  [
+    "resources/example-config.toml",
+    "usr/share/plasma-drop/examples/config.toml",
+    "644",
+  ],
+  [
+    "README.md",
+    "usr/share/doc/plasma-drop/README.md",
+    "644",
+  ],
+  [
+    "resources/icons/plasma-drop-icon.svg",
+    "usr/share/doc/plasma-drop/resources/icons/plasma-drop-icon.svg",
+    "644",
+  ],
+  [
+    "resources/icons/plasma-drop-icon.png",
+    "usr/share/doc/plasma-drop/resources/icons/plasma-drop-icon.png",
+    "644",
+  ],
+  [
+    "COPYING",
+    "usr/share/doc/plasma-drop/COPYING",
+    "644",
+  ],
 ]
 
 [package.metadata.generate-rpm]

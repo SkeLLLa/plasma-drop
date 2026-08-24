@@ -8,34 +8,22 @@ fetch_remote_versions_cache = "4h"
 missing_tools = "always"
 
 [tools]
-node = "25.8.2"
-rg = "15.1.0"
+node = "26.7.0"
+rg = "15.2.0"
 fd = "10.4.2"
-jq = "1.8.1"
-yq = "4.52.5"
+jq = "1.8.2"
+yq = "4.53.6"
 shellcheck = "0.11.0"
-shfmt = "3.13.0"
-rtk = { version = "0.34.2", postinstall = "rtk init -g --claude && rtk init -g --codex" }
-"npm:context-mode" = "1.0.89"
-rust = { version = "1.85.0", components = "rust-analyzer,rust-src" }
-cargo-binstall = "1.18.1"
-"cargo:cargo-deb" = "3.6.3"
-"cargo:cargo-generate-rpm" = "0.20.0"
-
-[tools."github:dmtrKovalenko/fff.nvim"]
-version = "0.6.1"
-exe = "fff-mcp"
-postinstall = """
-command -v claude >/dev/null && claude mcp remove fff -s user 2>/dev/null; \
-command -v claude >/dev/null && claude mcp add -s user fff -- $MISE_TOOL_INSTALL_PATH/fff-mcp --log-level warn || true; \
-command -v codex >/dev/null && codex mcp add fff -- $MISE_TOOL_INSTALL_PATH/fff-mcp --log-level warn || true
-"""
-
-[tools."github:dmtrKovalenko/fff.nvim".platforms]
-linux-x64 = { asset_pattern = "fff-mcp-x86_64-unknown-linux-musl" }
-linux-arm64 = { asset_pattern = "fff-mcp-aarch64-unknown-linux-musl" }
-macos-x64 = { asset_pattern = "fff-mcp-x86_64-apple-darwin" }
-macos-arm64 = { asset_pattern = "fff-mcp-aarch64-apple-darwin" }
+shfmt = "3.13.1"
+rtk = { version = "0.45.0", postinstall = "rtk init -g --claude && rtk init -g --codex" }
+"npm:context-mode" = "1.0.169"
+rust = { version = "1.98.0", components = "rust-analyzer,rust-src" }
+cargo-binstall = "1.22.0"
+"cargo:cargo-deb" = "3.7.0"
+"cargo:cargo-generate-rpm" = "0.21.0"
+"github:dmtrKovalenko/fff.nvim"= { version = "0.10.5", exe = "fff-mcp", postinstall = """
+command -v claude >/dev/null && claude mcp remove fff -s user 2>/dev/null; command -v claude >/dev/null && claude mcp add -s user fff -- $MISE_TOOL_INSTALL_PATH/fff-mcp --log-level warn || true; command -v codex >/dev/null && codex mcp add fff -- $MISE_TOOL_INSTALL_PATH/fff-mcp --log-level warn || true
+""", platforms = { linux-x64 = { asset_pattern = "fff-mcp-x86_64-unknown-linux-musl" }, linux-arm64 = { asset_pattern = "fff-mcp-aarch64-unknown-linux-musl" }, macos-x64 = { asset_pattern = "fff-mcp-x86_64-apple-darwin" }, macos-arm64 = { asset_pattern = "fff-mcp-aarch64-apple-darwin" } } }
 
 [tasks.build]
 description = "Build the Rust project"

@@ -242,7 +242,7 @@ impl ToggleService {
         }
 
         let frame_count = plan.frame_count();
-        let frame_delay = Duration::from_millis(16);
+        let frame_delay = plan.frame_delay();
         for frame_idx in 1..=frame_count {
             self.apply_window_state(internal_id, plan.frame_state(frame_idx))
                 .await?;
@@ -308,10 +308,10 @@ impl ToggleService {
 
     async fn current_screen(&self) -> Result<ScreenInfo> {
         let screens = self.current_screens().await;
-        if let Some(position) = self.kwin.get_cursor_position().await? {
-            if let Some(screen) = Self::screen_containing_point(&screens, &position) {
-                return Ok(screen.clone());
-            }
+        if let Some(position) = self.kwin.get_cursor_position().await?
+            && let Some(screen) = Self::screen_containing_point(&screens, &position)
+        {
+            return Ok(screen.clone());
         }
 
         if let Some(window) = self.kwin.get_active_window().await? {
@@ -437,10 +437,10 @@ impl ToggleService {
         config: &AppConfig,
         tracked_window_id: Option<String>,
     ) -> Result<Option<ManagedWindow>> {
-        if let Some(window_id) = tracked_window_id {
-            if let Some(window) = self.kwin.get_window(&window_id).await? {
-                return Ok(Some(window));
-            }
+        if let Some(window_id) = tracked_window_id
+            && let Some(window) = self.kwin.get_window(&window_id).await?
+        {
+            return Ok(Some(window));
         }
 
         if let Some(window) = self.find_matching_window(config).await? {
