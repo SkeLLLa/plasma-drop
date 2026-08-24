@@ -1,5 +1,5 @@
 use crate::hotkey::Hotkey;
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use regex::Regex;
 use serde::Deserialize;
 use std::collections::HashSet;
@@ -762,9 +762,10 @@ mod tests {
         });
 
         let err = Config::from_raw(make_raw(vec![raw])).unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("animation.duration_ms larger than 2000"));
+        assert!(
+            err.to_string()
+                .contains("animation.duration_ms larger than 2000")
+        );
     }
 
     #[test]
@@ -778,8 +779,9 @@ mod tests {
         });
 
         let err = Config::from_raw(make_raw(vec![raw])).unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("animation.frame_delay_ms that must be greater than 0"));
+        assert!(
+            err.to_string()
+                .contains("animation.frame_delay_ms that must be greater than 0")
+        );
     }
 }
