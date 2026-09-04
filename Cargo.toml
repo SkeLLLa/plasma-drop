@@ -1,6 +1,6 @@
 [package]
 name = "plasma-drop"
-version = "1.5.12"
+version = "1.6.0"
 edition = "2024"
 rust-version = "1.88"
 description = "KDE Plasma 6 dropdown app launcher"
