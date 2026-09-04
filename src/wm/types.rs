@@ -88,7 +88,7 @@ fn normalize_filename_matcher(filename: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{FrameGeometry, ManagedWindow, find_best_match, matches_window};
-    use crate::config::{AnimationConfig, AppConfig, AttachMode, PlacementConfig};
+    use crate::config::{AnimationConfig, AppConfig, AttachMode, HideBehavior, PlacementConfig};
     use crate::hotkey::Hotkey;
     use regex::Regex;
 
@@ -103,6 +103,8 @@ mod tests {
             attach_mode: AttachMode::FindOrStart,
             working_directory: None,
             hide_decorations: false,
+            hide_behavior: HideBehavior::Offscreen,
+            hide_on_focus_lost: false,
             placement: PlacementConfig::default(),
             animation: AnimationConfig::default(),
         }

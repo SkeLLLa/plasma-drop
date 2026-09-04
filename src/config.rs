@@ -12,6 +12,12 @@ pub enum AttachMode {
     FindOrStart,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HideBehavior {
+    Offscreen,
+    Minimize,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlacementMetric {
     Percent(i16),
@@ -80,6 +86,8 @@ pub struct AppConfig {
     pub attach_mode: AttachMode,
     pub working_directory: Option<PathBuf>,
     pub hide_decorations: bool,
+    pub hide_behavior: HideBehavior,
+    pub hide_on_focus_lost: bool,
     pub placement: PlacementConfig,
     pub animation: AnimationConfig,
 }
@@ -103,6 +111,8 @@ struct RawAppConfig {
     arguments: Option<Vec<String>>,
     working_directory: Option<PathBuf>,
     hide_decorations: Option<bool>,
+    hide_behavior: Option<String>,
+    hide_on_focus_lost: Option<bool>,
     placement: Option<RawPlacementConfig>,
     animation: Option<RawAnimationConfig>,
 }
@@ -150,7 +160,6 @@ impl Config {
                 }
             }
         };
-
         let mut names = HashSet::new();
         let mut hotkeys = HashSet::new();
         let mut apps = Vec::with_capacity(raw.apps.len());
@@ -184,6 +193,8 @@ impl Config {
                 "find-or-start" => AttachMode::FindOrStart,
                 other => bail!("app '{name}' has invalid attach_mode '{other}'"),
             };
+            let hide_behavior =
+                HideBehavior::parse(&name, app.hide_behavior.as_deref().unwrap_or("offscreen"))?;
 
             let arguments = app.arguments.unwrap_or_default();
             let command = build_spawn_command(
@@ -224,6 +235,8 @@ impl Config {
                 attach_mode,
                 working_directory: app.working_directory,
                 hide_decorations: app.hide_decorations.unwrap_or(false),
+                hide_behavior,
+                hide_on_focus_lost: app.hide_on_focus_lost.unwrap_or(false),
                 placement,
                 animation,
             });
@@ -400,6 +413,16 @@ impl PlacementPosition {
     }
 }
 
+impl HideBehavior {
+    fn parse(app_name: &str, raw: &str) -> Result<Self> {
+        match raw {
+            "offscreen" => Ok(Self::Offscreen),
+            "minimize" => Ok(Self::Minimize),
+            other => bail!("app '{app_name}' has invalid hide_behavior '{other}'"),
+        }
+    }
+}
+
 impl AnimationStyle {
     fn parse(app_name: &str, raw: &str) -> Result<Self> {
         match raw {
@@ -479,8 +502,8 @@ fn parse_metric(
 #[cfg(test)]
 mod tests {
     use super::{
-        AnimationConfig, AnimationEasing, AnimationStyle, Config, PlacementConfig, PlacementMetric,
-        PlacementPosition, RawAppConfig, RawConfig,
+        AnimationConfig, AnimationEasing, AnimationStyle, Config, HideBehavior, PlacementConfig,
+        PlacementMetric, PlacementPosition, RawAppConfig, RawConfig,
     };
     use std::path::PathBuf;
 
@@ -504,6 +527,8 @@ mod tests {
             arguments: None,
             working_directory: None,
             hide_decorations: None,
+            hide_behavior: None,
+            hide_on_focus_lost: None,
             placement: None,
             animation: None,
         }
@@ -566,6 +591,8 @@ mod tests {
         assert_eq!(config.apps[0].placement, PlacementConfig::default());
         assert_eq!(config.apps[0].animation, AnimationConfig::default());
         assert!(!config.apps[0].hide_decorations);
+        assert_eq!(config.apps[0].hide_behavior, HideBehavior::Offscreen);
+        assert!(!config.apps[0].hide_on_focus_lost);
     }
 
     #[test]
@@ -575,6 +602,26 @@ mod tests {
 
         let config = Config::from_raw(make_raw(vec![raw])).unwrap();
         assert!(config.apps[0].hide_decorations);
+    }
+
+    #[test]
+    fn accepts_hiding_options() {
+        let mut raw = app("terminal", "ctrl+grave");
+        raw.hide_behavior = Some("minimize".into());
+        raw.hide_on_focus_lost = Some(true);
+
+        let config = Config::from_raw(make_raw(vec![raw])).unwrap();
+        assert_eq!(config.apps[0].hide_behavior, HideBehavior::Minimize);
+        assert!(config.apps[0].hide_on_focus_lost);
+    }
+
+    #[test]
+    fn rejects_invalid_hide_behavior() {
+        let mut raw = app("terminal", "ctrl+grave");
+        raw.hide_behavior = Some("close".into());
+
+        let err = Config::from_raw(make_raw(vec![raw])).unwrap_err();
+        assert!(err.to_string().contains("invalid hide_behavior"));
     }
 
     #[test]

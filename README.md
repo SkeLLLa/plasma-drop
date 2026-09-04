@@ -182,6 +182,8 @@ hotkey = "super+f9"
 filename = "/usr/bin/dolphin"
 attach_mode = "find-or-start"
 hide_decorations = true
+hide_behavior = "minimize"
+hide_on_focus_lost = true
 
 [app.placement]
 width = "50%"
@@ -191,18 +193,22 @@ position = "left"
 
 Common fields:
 
-| Field | Purpose |
-| --- | --- |
-| `name` | Unique app identifier |
-| `hotkey` | Global shortcut, for example `super+f9` |
-| `filename` | App/window identity matcher |
-| `command` | Explicit launch command array, useful for wrappers such as Flatpak |
-| `attach_mode` | `find` or `find-or-start` |
-| `hide_decorations` | Hide the KWin title bar and border while managed |
-| `[app.placement]` | Width, height, position, and offsets |
-| `[app.animation]` | Optional slide/fade behavior |
+| Field                | Purpose                                                            |
+| -------------------- | ------------------------------------------------------------------ |
+| `name`               | Unique app identifier                                              |
+| `hotkey`             | Global shortcut, for example `super+f9`                            |
+| `filename`           | App/window identity matcher                                        |
+| `command`            | Explicit launch command array, useful for wrappers such as Flatpak |
+| `attach_mode`        | `find` or `find-or-start`                                          |
+| `hide_decorations`   | Hide the KWin title bar and border while managed                   |
+| `hide_behavior`      | `offscreen` (default) or KWin `minimize` when hidden               |
+| `hide_on_focus_lost` | Hide after focus moves to another window                           |
+| `[app.placement]`    | Width, height, position, and offsets                               |
+| `[app.animation]`    | Optional slide/fade behavior                                       |
 
-See [resources/example-config.toml](resources/example-config.toml) for native app and Flatpak
+Focus-loss hiding is event-driven through `KWin`
+
+See [resources/example-config.toml](resources/example-config.toml)
 examples, and [docs/configuration.md](docs/configuration.md) for every supported option.
 
 ## Documentation
@@ -238,15 +244,15 @@ mise run check
 
 Common project scripts:
 
-| Task | Make | mise |
-| --- | --- | --- |
-| Build | `make build` | `mise run build` |
-| Format | `make fmt` | `mise run fmt` |
-| Check format | `make fmt-check` | `mise run fmt-check` |
-| Lint | `make lint` or `make clippy` | `mise run lint` or `mise run clippy` |
-| Test | `make test` | `mise run test` |
-| Docs | `make doc` | `mise run doc` |
-| Full check | `make check` | `mise run check` |
+| Task         | Make                         | mise                                 |
+| ------------ | ---------------------------- | ------------------------------------ |
+| Build        | `make build`                 | `mise run build`                     |
+| Format       | `make fmt`                   | `mise run fmt`                       |
+| Check format | `make fmt-check`             | `mise run fmt-check`                 |
+| Lint         | `make lint` or `make clippy` | `mise run lint` or `mise run clippy` |
+| Test         | `make test`                  | `mise run test`                      |
+| Docs         | `make doc`                   | `mise run doc`                       |
+| Full check   | `make check`                 | `mise run check`                     |
 
 Both runners delegate to the same Cargo commands.
 

@@ -34,6 +34,7 @@ pub(crate) struct BridgeState {
     waiters: Mutex<HashMap<Uuid, oneshot::Sender<ResponseEnvelope>>>,
     last_enqueued: Mutex<Instant>,
     pub hotkey_tx: mpsc::UnboundedSender<String>,
+    pub focus_tx: mpsc::UnboundedSender<()>,
 }
 
 pub type SharedBridgeState = Arc<BridgeState>;
@@ -81,14 +82,20 @@ pub struct KWinClient {
 }
 
 impl KWinClient {
-    pub async fn connect() -> Result<(Self, mpsc::UnboundedReceiver<String>)> {
+    pub async fn connect() -> Result<(
+        Self,
+        mpsc::UnboundedReceiver<String>,
+        mpsc::UnboundedReceiver<()>,
+    )> {
         let (hotkey_tx, hotkey_rx) = mpsc::unbounded_channel();
+        let (focus_tx, focus_rx) = mpsc::unbounded_channel();
         let state = Arc::new(BridgeState {
             queue: Mutex::new(VecDeque::new()),
             queue_notify: Notify::new(),
             waiters: Mutex::new(HashMap::new()),
             last_enqueued: Mutex::new(Instant::now()),
             hotkey_tx,
+            focus_tx,
         });
 
         let object = PlasmaDropDbusObject {
@@ -134,6 +141,7 @@ impl KWinClient {
                 keepalive_task,
             },
             hotkey_rx,
+            focus_rx,
         ))
     }
 
@@ -283,6 +291,15 @@ impl KWinClient {
         Ok(())
     }
 
+    pub async fn minimize_window(&self, internal_id: &str, minimized: bool) -> Result<()> {
+        self.send_command::<Value>(
+            "MINIMIZE_WINDOW",
+            json!({ "internalId": internal_id, "minimized": minimized }),
+        )
+        .await?;
+        Ok(())
+    }
+
     pub async fn bring_window_to_foreground(&self, internal_id: &str) -> Result<()> {
         self.send_command::<Value>(
             "BRING_WINDOW_TO_FOREGROUND",
@@ -379,6 +396,10 @@ impl WindowManager for KWinClient {
 
     async fn set_window_no_border(&self, internal_id: &str, no_border: bool) -> Result<()> {
         Self::set_window_no_border(self, internal_id, no_border).await
+    }
+
+    async fn minimize_window(&self, internal_id: &str, minimized: bool) -> Result<()> {
+        Self::minimize_window(self, internal_id, minimized).await
     }
 
     async fn bring_window_to_foreground(&self, internal_id: &str) -> Result<()> {

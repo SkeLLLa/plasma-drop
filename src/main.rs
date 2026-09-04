@@ -62,7 +62,7 @@ async fn main() -> Result<()> {
     init_tracing(&cli, &config);
     info!("loaded config from {}", config_path.display());
 
-    let (kwin, mut hotkey_rx) = KWinClient::connect().await?;
+    let (kwin, mut hotkey_rx, mut focus_rx) = KWinClient::connect().await?;
     kwin.ensure_compatibility().await?;
 
     let script_path = ensure_script_file().await?;
@@ -101,7 +101,6 @@ async fn main() -> Result<()> {
 
     let kwin = Arc::new(kwin);
     let toggle_service = ToggleService::new(registry.clone(), kwin.clone(), screens);
-
     let result = loop {
         tokio::select! {
             maybe_hotkey = hotkey_rx.recv() => {
@@ -109,6 +108,16 @@ async fn main() -> Result<()> {
                     Some(shortcut_id) => {
                         if let Err(error) = toggle_service.handle_shortcut(&shortcut_id).await {
                             warn!("hotkey '{}' failed: {error:#}", shortcut_id);
+                        }
+                    }
+                    None => break Ok(()),
+                }
+            }
+            maybe_focus = focus_rx.recv() => {
+                match maybe_focus {
+                    Some(()) => {
+                        if let Err(error) = toggle_service.handle_focus_change().await {
+                            warn!("failed to hide app after focus change: {error:#}");
                         }
                     }
                     None => break Ok(()),

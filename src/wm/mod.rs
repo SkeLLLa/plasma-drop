@@ -21,5 +21,6 @@ pub trait WindowManager: Send + Sync {
     async fn resize_window(&self, internal_id: &str, geometry: &FrameGeometry) -> Result<()>;
     async fn set_window_opacity(&self, internal_id: &str, opacity: f64) -> Result<()>;
     async fn set_window_no_border(&self, internal_id: &str, no_border: bool) -> Result<()>;
+    async fn minimize_window(&self, internal_id: &str, minimized: bool) -> Result<()>;
     async fn bring_window_to_foreground(&self, internal_id: &str) -> Result<()>;
 }

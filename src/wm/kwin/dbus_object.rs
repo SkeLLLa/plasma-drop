@@ -33,4 +33,10 @@ impl PlasmaDropDbusObject {
             debug!("hotkey receiver dropped (shutdown): {error}");
         }
     }
+
+    fn on_focus_changed(&self) {
+        if self.state.focus_tx.send(()).is_err() {
+            debug!("focus receiver dropped (shutdown)");
+        }
+    }
 }

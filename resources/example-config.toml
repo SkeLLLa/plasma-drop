@@ -7,6 +7,10 @@ hotkey = "super+f9"
 filename = "/usr/bin/dolphin"
 attach_mode = "find-or-start"
 hide_decorations = true
+# "offscreen" (default) parks the window outside the screens; "minimize" uses KWin minimize.
+hide_behavior = "minimize"
+# Hide when another window becomes active, like a drop-down terminal.
+hide_on_focus_lost = true
 
 [app.placement]
 width = "50%"
@@ -25,6 +29,8 @@ name = "kate"
 hotkey = "super+f7"
 filename = "/usr/bin/kate"
 attach_mode = "find-or-start"
+# Keep the default behavior explicit for the slide/fade example below.
+hide_behavior = "offscreen"
 
 [app.placement]
 width = "50%"

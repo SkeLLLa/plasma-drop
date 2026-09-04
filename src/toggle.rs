@@ -1,6 +1,6 @@
 use crate::animation::{TransitionPhase, TransitionPlan, WindowState};
 use crate::app_registry::AppRegistry;
-use crate::config::{AppConfig, AttachMode};
+use crate::config::{AppConfig, AttachMode, HideBehavior};
 use crate::screen::{ScreenInfo, hidden_rect_for_screens, parse_support_information};
 use crate::wm::{FrameGeometry, ManagedWindow, Point, WindowManager, find_best_match};
 use anyhow::{Context, Result, bail};
@@ -131,6 +131,40 @@ impl ToggleService {
         }
     }
 
+    pub async fn handle_focus_change(&self) -> Result<()> {
+        let app_name = {
+            let registry = self.registry.lock().await;
+            registry.currently_visible_name().and_then(|name| {
+                registry
+                    .managed_app(name)
+                    .filter(|app| app.config.hide_on_focus_lost)
+                    .map(|_| name.to_string())
+            })
+        };
+        let Some(app_name) = app_name else {
+            return Ok(());
+        };
+
+        // The event can be queued while another app is hiding, so use KWin's current state
+        // rather than the activation that originally triggered the event.
+        let active_window_id = self
+            .kwin
+            .get_active_window()
+            .await?
+            .map(|window| window.internal_id);
+        let is_active = self
+            .registry
+            .lock()
+            .await
+            .managed_app(&app_name)
+            .and_then(|app| app.tracked_window_id.as_deref())
+            == active_window_id.as_deref();
+        if !is_active {
+            self.hide_app(&app_name).await?;
+        }
+        Ok(())
+    }
+
     async fn show_app(&self, app_name: &str, preferred_screen: Option<ScreenInfo>) -> Result<()> {
         let registry = self.registry.lock().await;
         let app = require_app(&registry, app_name)?;
@@ -139,6 +173,11 @@ impl ToggleService {
         drop(registry);
 
         let window = self.resolve_window(&config, existing_id).await?;
+        if config.hide_behavior == HideBehavior::Minimize {
+            self.kwin
+                .minimize_window(&window.internal_id, false)
+                .await?;
+        }
         if config.hide_decorations {
             self.hide_window_decorations(app_name, &window).await?;
         }
@@ -194,21 +233,25 @@ impl ToggleService {
             .resolve_existing_window(&config, tracked_window_id)
             .await?;
         if let Some(window) = resolved_window {
-            let screens = self.current_screens().await;
-            let screen = Self::screen_for_window(&screens, &window);
-            let visible_rect = screen.placement_rect(&config.placement);
-            let hidden_rect = hidden_rect_for_screens(&screens, &visible_rect);
-            if let Some(plan) = TransitionPlan::from_config(
-                &config.animation,
-                &visible_rect,
-                &hidden_rect,
-                TransitionPhase::Hide,
-            ) {
-                self.run_animation(&window.internal_id, &plan, false)
-                    .await?;
+            if config.hide_behavior == HideBehavior::Minimize {
+                self.kwin.minimize_window(&window.internal_id, true).await?;
             } else {
-                self.apply_hidden_geometry(&window.internal_id, &hidden_rect)
-                    .await?;
+                let screens = self.current_screens().await;
+                let screen = Self::screen_for_window(&screens, &window);
+                let visible_rect = screen.placement_rect(&config.placement);
+                let hidden_rect = hidden_rect_for_screens(&screens, &visible_rect);
+                if let Some(plan) = TransitionPlan::from_config(
+                    &config.animation,
+                    &visible_rect,
+                    &hidden_rect,
+                    TransitionPhase::Hide,
+                ) {
+                    self.run_animation(&window.internal_id, &plan, false)
+                        .await?;
+                } else {
+                    self.apply_hidden_geometry(&window.internal_id, &hidden_rect)
+                        .await?;
+                }
             }
 
             let mut registry = self.registry.lock().await;
@@ -569,7 +612,8 @@ mod tests {
     use super::{HOTKEY_DEBOUNCE_WINDOW, ToggleService, should_ignore_shortcut};
     use crate::app_registry::{AppRegistry, ManagedApp};
     use crate::config::{
-        AnimationConfig, AppConfig, AttachMode, PlacementConfig, PlacementMetric, PlacementPosition,
+        AnimationConfig, AppConfig, AttachMode, HideBehavior, PlacementConfig, PlacementMetric,
+        PlacementPosition,
     };
     use crate::hotkey::Hotkey;
     use crate::screen::ScreenInfo;
@@ -663,6 +707,14 @@ mod tests {
             Ok(())
         }
 
+        async fn minimize_window(&self, internal_id: &str, minimized: bool) -> Result<()> {
+            self.calls
+                .lock()
+                .await
+                .push(format!("minimized:{internal_id}:{minimized}"));
+            Ok(())
+        }
+
         async fn bring_window_to_foreground(&self, internal_id: &str) -> Result<()> {
             self.calls
                 .lock()
@@ -683,6 +735,8 @@ mod tests {
             attach_mode: AttachMode::FindOrStart,
             working_directory: None,
             hide_decorations: false,
+            hide_behavior: HideBehavior::Offscreen,
+            hide_on_focus_lost: false,
             placement: PlacementConfig::default(),
             animation: AnimationConfig::default(),
         }
@@ -1035,6 +1089,120 @@ mod tests {
                 "resize:{abc}:960:-1080:960:1080".to_string(),
                 "move:{abc}:960:-1080:960:1080".to_string()
             ]
+        );
+    }
+
+    #[tokio::test]
+    async fn toggle_off_minimizes_when_configured() {
+        let mut app = app("dolphin", "super+f9", "dolphin");
+        app.hide_behavior = HideBehavior::Minimize;
+        let managed = managed_app(app, "{abc}", true);
+        let registry = Arc::new(Mutex::new(AppRegistry::new(vec![managed])));
+        let kwin = mock_kwin(Some(window(
+            "{abc}",
+            "dolphin",
+            "Dolphin",
+            geometry(10, 20, 300, 400),
+        )));
+        let service = ToggleService::new(registry, kwin.clone(), vec![screen()]);
+
+        service.toggle_app("dolphin").await.unwrap();
+
+        assert_eq!(
+            *kwin.calls.lock().await,
+            vec!["minimized:{abc}:true".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn toggle_on_restores_minimized_window() {
+        let mut app = app("dolphin", "super+f9", "dolphin");
+        app.hide_behavior = HideBehavior::Minimize;
+        let managed = managed_app(app, "{abc}", false);
+        let registry = Arc::new(Mutex::new(AppRegistry::new(vec![managed])));
+        let kwin = mock_kwin(Some(window(
+            "{abc}",
+            "dolphin",
+            "Dolphin",
+            geometry(10, 20, 300, 400),
+        )));
+        let service = ToggleService::new(registry, kwin.clone(), vec![screen()]);
+
+        service.toggle_app("dolphin").await.unwrap();
+
+        assert_eq!(
+            *kwin.calls.lock().await,
+            vec![
+                "minimized:{abc}:false".to_string(),
+                "move:{abc}:0:0:1920:1080".to_string(),
+                "resize:{abc}:0:0:1920:1080".to_string(),
+                "foreground:{abc}".to_string(),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn hides_visible_app_after_focus_moves_away() {
+        let mut app = app("dolphin", "super+f9", "dolphin");
+        app.hide_on_focus_lost = true;
+        let managed = managed_app(app, "{abc}", true);
+        let registry = Arc::new(Mutex::new(AppRegistry::new(vec![managed])));
+        registry.lock().await.set_visible("dolphin", true);
+        let kwin = mock_kwin(Some(window(
+            "{abc}",
+            "dolphin",
+            "Dolphin",
+            geometry(10, 20, 300, 400),
+        )));
+        *kwin.active_window.lock().await = Some(window(
+            "{other}",
+            "konsole",
+            "Konsole",
+            geometry(0, 0, 800, 600),
+        ));
+        let service = ToggleService::new(registry.clone(), kwin.clone(), vec![screen()]);
+
+        service.handle_focus_change().await.unwrap();
+
+        assert_eq!(
+            *kwin.calls.lock().await,
+            vec![
+                "resize:{abc}:0:-1080:1920:1080".to_string(),
+                "move:{abc}:0:-1080:1920:1080".to_string(),
+            ]
+        );
+        assert!(
+            !registry
+                .lock()
+                .await
+                .managed_app("dolphin")
+                .unwrap()
+                .visible
+        );
+    }
+
+    #[tokio::test]
+    async fn focus_change_keeps_the_active_app_visible() {
+        let mut app = app("dolphin", "super+f9", "dolphin");
+        app.hide_on_focus_lost = true;
+        let managed = managed_app(app, "{abc}", true);
+        let registry = Arc::new(Mutex::new(AppRegistry::new(vec![managed])));
+        registry.lock().await.set_visible("dolphin", true);
+        let active = window("{abc}", "dolphin", "Dolphin", geometry(10, 20, 300, 400));
+        let kwin = mock_kwin(Some(active.clone()));
+        *kwin.active_window.lock().await = Some(active);
+        let service = ToggleService::new(registry.clone(), kwin.clone(), vec![screen()]);
+
+        service.handle_focus_change().await.unwrap();
+
+        assert!(kwin.calls.lock().await.is_empty());
+        assert!(
+            registry
+                .lock()
+                .await
+                .managed_app("dolphin")
+                .unwrap()
+                .visible
         );
     }
 

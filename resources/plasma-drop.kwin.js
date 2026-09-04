@@ -73,6 +73,15 @@ bridge.getNextCommand = () => {
     );
 };
 
+bridge.onFocusChanged = () => {
+    callDBus(
+        bridge.DBUS_SERVICE,
+        bridge.DBUS_PATH,
+        bridge.DBUS_INTERFACE,
+        "OnFocusChanged"
+    );
+};
+
 bridge.sendResponse = (cmdInfo, params, exceptionMessage) => {
     callDBus(
         bridge.DBUS_SERVICE,
@@ -163,6 +172,11 @@ cmds["SET_WINDOW_NO_BORDER"] = (params) => {
     window.noBorder = Boolean(params.noBorder);
     return {};
 };
+cmds["MINIMIZE_WINDOW"] = (params) => {
+    const window = kwin.getWindowByInternalIdRequired(params.internalId);
+    window.minimized = Boolean(params.minimized);
+    return {};
+};
 cmds["BRING_WINDOW_TO_FOREGROUND"] = (params) => {
     const window = kwin.getWindowByInternalIdRequired(params.internalId);
     kwin.setActiveWindow(window);
@@ -183,5 +197,10 @@ cmds["REGISTER_HOT_KEY"] = (params) => {
     });
     return {};
 };
+
+const activationSignal = workspace.windowActivated || workspace.clientActivated;
+if (activationSignal) {
+    activationSignal.connect(bridge.onFocusChanged);
+}
 
 bridge.getNextCommand();

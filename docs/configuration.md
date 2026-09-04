@@ -25,6 +25,8 @@ The effective log level is resolved with the following priority (highest first):
 - `attach_mode`: `find` or `find-or-start`
 - `working_directory`: optional absolute working directory
 - `hide_decorations`: optional boolean; hide the `KWin` title bar/border while plasma-drop manages the window
+- `hide_behavior`: optional `offscreen` (default) or `minimize`; determines whether hiding parks the window outside the screens or uses `KWin`'s minimized state
+- `hide_on_focus_lost`: optional boolean; hide the managed app when another window becomes active. Defaults to `false`.
 
 ## Matching Behavior
 
@@ -50,6 +52,39 @@ This split is important for wrapper-based apps such as Flatpak, where launch ide
 Set `hide_decorations = true` in an `[[app]]` entry to remove the `KWin` title bar and border while plasma-drop controls that window.
 
 plasma-drop records the window's original decoration state when it attaches and restores it on shutdown. Existing undecorated windows remain undecorated.
+
+## Hiding
+
+`hide_behavior = "offscreen"` is the default: the window remains running and is parked outside every screen. It is the behavior to use with slide-out animations.
+
+`hide_behavior = "minimize"` uses `KWin` minimization instead. The window is restored before it is shown again, but minimizing hides immediately and skips every hide animation. A `fade` animation can still fade the restored window in. `slide` and `slide-fade` run only on show and may briefly display the restored window at its old position before moving it to the off-screen animation start. Use `offscreen` for symmetric, flicker-free slide animations.
+
+Set `hide_on_focus_lost = true` for a drop-down-terminal-style window. plasma-drop listens to `KWin` activation events and hides the app when another window becomes active.
+
+Off-screen sliding:
+
+```toml
+[[app]]
+name = "terminal"
+hotkey = "super+grave"
+filename = "/usr/bin/kitty"
+hide_behavior = "offscreen"
+
+[app.animation]
+style = "slide"
+duration_ms = 180
+```
+
+Native minimize on focus loss:
+
+```toml
+[[app]]
+name = "notes"
+hotkey = "super+n"
+filename = "/usr/bin/kate"
+hide_behavior = "minimize"
+hide_on_focus_lost = true
+```
 
 ## Placement
 
@@ -105,3 +140,5 @@ Current status:
 - `fade` animates window opacity using the `KWin` script bridge
 - `slide-fade` combines both tracks
 - `none` keeps the original instant behavior
+
+With `hide_behavior = "minimize"`, the hide transition is always immediate. Only the show transition can animate; prefer `fade` or `none` for that mode.
