@@ -178,6 +178,11 @@ impl ToggleService {
                 .minimize_window(&window.internal_id, false)
                 .await?;
         }
+        if config.follow_current_desktop {
+            self.kwin
+                .move_window_to_current_desktop(&window.internal_id)
+                .await?;
+        }
         if config.hide_decorations {
             self.hide_window_decorations(app_name, &window).await?;
         }
@@ -722,6 +727,14 @@ mod tests {
                 .push(format!("foreground:{internal_id}"));
             Ok(())
         }
+
+        async fn move_window_to_current_desktop(&self, internal_id: &str) -> Result<()> {
+            self.calls
+                .lock()
+                .await
+                .push(format!("desktop:{internal_id}"));
+            Ok(())
+        }
     }
 
     fn app(name: &str, hotkey: &str, filename: &str) -> AppConfig {
@@ -737,6 +750,7 @@ mod tests {
             hide_decorations: false,
             hide_behavior: HideBehavior::Offscreen,
             hide_on_focus_lost: false,
+            follow_current_desktop: false,
             placement: PlacementConfig::default(),
             animation: AnimationConfig::default(),
         }
@@ -874,6 +888,34 @@ mod tests {
         assert_eq!(
             calls,
             vec![
+                "move:{abc}:0:0:1920:1080".to_string(),
+                "resize:{abc}:0:0:1920:1080".to_string(),
+                "foreground:{abc}".to_string()
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn toggle_on_moves_to_current_desktop_when_following() {
+        let mut app = app("dolphin", "super+f9", "dolphin");
+        app.follow_current_desktop = true;
+        let managed = managed_app(app, "{abc}", false);
+        let registry = Arc::new(Mutex::new(AppRegistry::new(vec![managed])));
+        let kwin = mock_kwin(Some(window(
+            "{abc}",
+            "dolphin",
+            "Dolphin",
+            geometry(10, 20, 300, 400),
+        )));
+        let service = ToggleService::new(registry, kwin.clone(), vec![screen()]);
+
+        service.toggle_app("dolphin").await.unwrap();
+
+        let calls = kwin.calls.lock().await.clone();
+        assert_eq!(
+            calls,
+            vec![
+                "desktop:{abc}".to_string(),
                 "move:{abc}:0:0:1920:1080".to_string(),
                 "resize:{abc}:0:0:1920:1080".to_string(),
                 "foreground:{abc}".to_string()
