@@ -88,6 +88,7 @@ pub struct AppConfig {
     pub hide_decorations: bool,
     pub hide_behavior: HideBehavior,
     pub hide_on_focus_lost: bool,
+    pub follow_current_desktop: bool,
     pub placement: PlacementConfig,
     pub animation: AnimationConfig,
 }
@@ -113,6 +114,7 @@ struct RawAppConfig {
     hide_decorations: Option<bool>,
     hide_behavior: Option<String>,
     hide_on_focus_lost: Option<bool>,
+    follow_current_desktop: Option<bool>,
     placement: Option<RawPlacementConfig>,
     animation: Option<RawAnimationConfig>,
 }
@@ -237,6 +239,7 @@ impl Config {
                 hide_decorations: app.hide_decorations.unwrap_or(false),
                 hide_behavior,
                 hide_on_focus_lost: app.hide_on_focus_lost.unwrap_or(false),
+                follow_current_desktop: app.follow_current_desktop.unwrap_or(false),
                 placement,
                 animation,
             });
@@ -529,6 +532,7 @@ mod tests {
             hide_decorations: None,
             hide_behavior: None,
             hide_on_focus_lost: None,
+            follow_current_desktop: None,
             placement: None,
             animation: None,
         }
@@ -593,6 +597,7 @@ mod tests {
         assert!(!config.apps[0].hide_decorations);
         assert_eq!(config.apps[0].hide_behavior, HideBehavior::Offscreen);
         assert!(!config.apps[0].hide_on_focus_lost);
+        assert!(!config.apps[0].follow_current_desktop);
     }
 
     #[test]
@@ -602,6 +607,15 @@ mod tests {
 
         let config = Config::from_raw(make_raw(vec![raw])).unwrap();
         assert!(config.apps[0].hide_decorations);
+    }
+
+    #[test]
+    fn accepts_follow_current_desktop_option() {
+        let mut raw = app("terminal", "ctrl+grave");
+        raw.follow_current_desktop = Some(true);
+
+        let config = Config::from_raw(make_raw(vec![raw])).unwrap();
+        assert!(config.apps[0].follow_current_desktop);
     }
 
     #[test]

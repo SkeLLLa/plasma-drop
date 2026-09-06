@@ -23,4 +23,5 @@ pub trait WindowManager: Send + Sync {
     async fn set_window_no_border(&self, internal_id: &str, no_border: bool) -> Result<()>;
     async fn minimize_window(&self, internal_id: &str, minimized: bool) -> Result<()>;
     async fn bring_window_to_foreground(&self, internal_id: &str) -> Result<()>;
+    async fn move_window_to_current_desktop(&self, internal_id: &str) -> Result<()>;
 }

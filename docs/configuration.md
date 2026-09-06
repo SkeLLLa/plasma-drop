@@ -27,6 +27,7 @@ The effective log level is resolved with the following priority (highest first):
 - `hide_decorations`: optional boolean; hide the `KWin` title bar/border while plasma-drop manages the window
 - `hide_behavior`: optional `offscreen` (default) or `minimize`; determines whether hiding parks the window outside the screens or uses `KWin`'s minimized state
 - `hide_on_focus_lost`: optional boolean; hide the managed app when another window becomes active. Defaults to `false`.
+- `follow_current_desktop`: optional boolean; when the app is shown, move its window onto the virtual desktop you are currently viewing. Defaults to `false`.
 
 ## Matching Behavior
 
@@ -85,6 +86,24 @@ filename = "/usr/bin/kate"
 hide_behavior = "minimize"
 hide_on_focus_lost = true
 ```
+
+## Desktops
+
+By default a managed window stays on whatever virtual desktop it was opened on, so triggering the
+hotkey from another desktop reveals the window where it already lives. Set
+`follow_current_desktop = true` to move the window onto the desktop you are currently viewing each
+time it is shown, so the dropdown always appears in front of you:
+
+```toml
+[[app]]
+name = "terminal"
+hotkey = "super+grave"
+filename = "/usr/bin/kitty"
+follow_current_desktop = true
+```
+
+Only the virtual desktop assignment changes, and only at show time; placement, hiding, and animation
+still apply as configured. Defaults to `false`.
 
 ## Placement
 

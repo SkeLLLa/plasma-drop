@@ -105,6 +105,7 @@ mod tests {
             hide_decorations: false,
             hide_behavior: HideBehavior::Offscreen,
             hide_on_focus_lost: false,
+            follow_current_desktop: false,
             placement: PlacementConfig::default(),
             animation: AnimationConfig::default(),
         }

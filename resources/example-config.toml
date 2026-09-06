@@ -11,6 +11,8 @@ hide_decorations = true
 hide_behavior = "minimize"
 # Hide when another window becomes active, like a drop-down terminal.
 hide_on_focus_lost = true
+# Move the window onto the desktop you are currently viewing when shown (default: false).
+follow_current_desktop = true
 
 [app.placement]
 width = "50%"
