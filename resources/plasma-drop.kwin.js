@@ -182,6 +182,14 @@ cmds["BRING_WINDOW_TO_FOREGROUND"] = (params) => {
     kwin.setActiveWindow(window);
     return {};
 };
+cmds["MOVE_WINDOW_TO_CURRENT_DESKTOP"] = (params) => {
+    const window = kwin.getWindowByInternalIdRequired(params.internalId);
+    const currentDesktop = workspace.currentDesktop;
+    if (currentDesktop) {
+        window.desktops = [currentDesktop];
+    }
+    return {};
+};
 cmds["REGISTER_HOT_KEY"] = (params) => {
     registerShortcut(params.name, params.title, params.sequence, () => {
         callDBus(

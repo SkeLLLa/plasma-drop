@@ -309,6 +309,15 @@ impl KWinClient {
         Ok(())
     }
 
+    pub async fn move_window_to_current_desktop(&self, internal_id: &str) -> Result<()> {
+        self.send_command::<Value>(
+            "MOVE_WINDOW_TO_CURRENT_DESKTOP",
+            json!({ "internalId": internal_id }),
+        )
+        .await?;
+        Ok(())
+    }
+
     pub async fn support_information_text(&self) -> Result<String> {
         let response: SupportInformationResponse = self
             .send_command("GET_SUPPORT_INFORMATION", json!({}))
@@ -404,5 +413,9 @@ impl WindowManager for KWinClient {
 
     async fn bring_window_to_foreground(&self, internal_id: &str) -> Result<()> {
         Self::bring_window_to_foreground(self, internal_id).await
+    }
+
+    async fn move_window_to_current_desktop(&self, internal_id: &str) -> Result<()> {
+        Self::move_window_to_current_desktop(self, internal_id).await
     }
 }
