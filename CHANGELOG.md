@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.0](https://github.com/SkeLLLa/plasma-drop/compare/v1.6.0...v1.7.0) - 2026-09-07
+
+### Added
+
+- follow the current virtual desktop when showing an app
+
+### Fixed
+
+- *(deps)* bump uuid from 1.25.0 to 1.26.0 in the all-minor-patch group
+
 ## [1.6.0](https://github.com/SkeLLLa/plasma-drop/compare/v1.5.12...v1.6.0) - 2026-09-04
 
 ### Added
