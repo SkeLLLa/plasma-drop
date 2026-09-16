@@ -85,6 +85,7 @@ fn normalize_key(token: &str, raw: &str) -> Result<String> {
         "escape" | "esc" => "Esc".to_string(),
         "minus" | "-" => "-".to_string(),
         "equal" | "=" => "=".to_string(),
+        "twosuperior" | "²" => "²".to_string(),
         _ if lower.len() == 1 && lower.chars().all(|ch| ch.is_ascii_alphabetic()) => {
             lower.to_ascii_uppercase()
         }
@@ -143,5 +144,12 @@ mod tests {
     fn parses_single_key() {
         let hotkey = Hotkey::parse("F12").unwrap();
         assert_eq!(hotkey.sequence(), "F12");
+    }
+    #[test]
+    fn parses_twosuperior_hotkey() {
+        let hotkey1 = Hotkey::parse("ctrl+²").unwrap();
+        assert_eq!(hotkey1.sequence(), "Ctrl+²");
+        let hotkey2 = Hotkey::parse("ctrl+twosuperior").unwrap();
+        assert_eq!(hotkey2.sequence(), "Ctrl+²");
     }
 }
