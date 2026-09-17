@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.0](https://github.com/SkeLLLa/plasma-drop/compare/v1.7.0...v1.8.0) - 2026-09-17
+
+### Added
+
+- *(hotkey)* add support for the '²' (twosuperior) key
+
 ## [1.7.0](https://github.com/SkeLLLa/plasma-drop/compare/v1.6.0...v1.7.0) - 2026-09-07
 
 ### Added
