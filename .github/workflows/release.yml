@@ -232,6 +232,16 @@ jobs:
             target/release-assets/plasma-drop-${{ steps.release-plz.outputs.version }}-1.x86_64.rpm.sha256
             target/release-assets/SHA256SUMS
 
+      - name: Publish packslip manifest
+        if: ${{ steps.release-plz.outputs.released == 'true' }}
+        uses: jdx/packslip@v1
+        with:
+          artifacts: target/release-assets/plasma-drop-${{ steps.release-plz.outputs.version }}-${{ env.RUST_TARGET }}.tar.gz
+          bin: plasma-drop
+          tag: ${{ steps.release-plz.outputs.tag_name }}
+          version: ${{ steps.release-plz.outputs.version }}
+          attest: link
+
       - name: Upload package repository inputs
         if: ${{ steps.release-plz.outputs.released == 'true' }}
         uses: actions/upload-artifact@v7
