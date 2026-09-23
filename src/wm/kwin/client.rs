@@ -419,3 +419,113 @@ impl WindowManager for KWinClient {
         Self::move_window_to_current_desktop(self, internal_id).await
     }
 }
+
+#[cfg(test)]
+mod bridge_state_tests {
+    use super::{BridgeState, HashMap, Mutex, Notify, VecDeque};
+    use crate::wm::kwin::types::ResponseEnvelope;
+    use serde_json::json;
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+    use tokio::sync::{mpsc, oneshot};
+    use uuid::Uuid;
+
+    fn test_state() -> BridgeState {
+        let (hotkey_tx, _hotkey_rx) = mpsc::unbounded_channel();
+        let (focus_tx, _focus_rx) = mpsc::unbounded_channel();
+        BridgeState {
+            queue: Mutex::new(VecDeque::new()),
+            queue_notify: Notify::new(),
+            waiters: Mutex::new(HashMap::new()),
+            last_enqueued: Mutex::new(Instant::now()),
+            hotkey_tx,
+            focus_tx,
+        }
+    }
+
+    #[tokio::test]
+    async fn next_command_returns_enqueued_payloads_in_order() {
+        let state = test_state();
+        state.enqueue("first".to_string()).await;
+        state.enqueue("second".to_string()).await;
+
+        assert_eq!(state.next_command().await, "first");
+        assert_eq!(state.next_command().await, "second");
+    }
+
+    #[tokio::test]
+    async fn next_command_waits_until_something_is_enqueued() {
+        let state = Arc::new(test_state());
+        let waiter = tokio::spawn({
+            let state = state.clone();
+            async move { state.next_command().await }
+        });
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(
+            !waiter.is_finished(),
+            "next_command should still be waiting with an empty queue"
+        );
+
+        state.enqueue("late".to_string()).await;
+        let received = tokio::time::timeout(Duration::from_secs(1), waiter)
+            .await
+            .expect("next_command should resolve once a command is enqueued")
+            .unwrap();
+        assert_eq!(received, "late");
+    }
+
+    #[tokio::test]
+    async fn resolve_response_delivers_to_the_matching_waiter_and_removes_it() {
+        let state = test_state();
+        let responder_id = Uuid::new_v4();
+        let (tx, rx) = oneshot::channel();
+        state.waiters.lock().await.insert(responder_id, tx);
+
+        let payload = json!({
+            "cmdType": "GET_WINDOW_LIST",
+            "responderId": responder_id,
+            "params": {},
+            "exception_message": null,
+        })
+        .to_string();
+
+        state.resolve_response(&payload).await.unwrap();
+
+        let response = rx.await.expect("waiter should receive the response");
+        assert_eq!(response.responder_id, responder_id);
+        assert!(state.waiters.lock().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn resolve_response_for_an_unknown_responder_is_not_an_error() {
+        let state = test_state();
+        let payload = json!({
+            "cmdType": "GET_WINDOW_LIST",
+            "responderId": Uuid::new_v4(),
+            "params": {},
+            "exception_message": null,
+        })
+        .to_string();
+
+        assert!(state.resolve_response(&payload).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn resolve_response_rejects_malformed_json() {
+        let state = test_state();
+        assert!(state.resolve_response("not json").await.is_err());
+    }
+
+    #[test]
+    fn response_envelope_deserializes_expected_wire_format() {
+        // Guards the field renames (`cmdType`/`responderId`) that
+        // `resolve_response` depends on to parse the KWin script's replies.
+        let value: ResponseEnvelope = serde_json::from_str(
+            r#"{"cmdType":"GET_WINDOW_LIST","responderId":"00000000-0000-0000-0000-000000000000","params":{},"exception_message":"boom"}"#,
+        )
+        .unwrap();
+        assert_eq!(value.cmd_type, "GET_WINDOW_LIST");
+        assert_eq!(value.exception_message.as_deref(), Some("boom"));
+    }
+}

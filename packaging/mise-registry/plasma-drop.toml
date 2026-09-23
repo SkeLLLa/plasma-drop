@@ -1,0 +1,19 @@
+# Staged copy of the mise registry entry for plasma-drop.
+#
+# Not consumed by mise from here - this repo's own .mise.toml still pins the
+# tool via an explicit backend. Once plasma-drop meets mise's popularity bar
+# (https://mise.jdx.dev/contributing.html#adding-tools), copy this file to
+# registry/plasma-drop.toml in a jdx/mise PR.
+#
+# Verified 2026-09-23: v1.9.0 is the first release carrying packslip.sigstore.json
+# (`mise install packslip:github.com/SkeLLLa/plasma-drop@1.9.0` installs and runs).
+
+version_order = "semver"
+description = "KDE Plasma 6 dropdown app launcher"
+backends = [
+  { full = "packslip:github.com/SkeLLLa/plasma-drop", min_version = "1.9.0" },
+  "github:SkeLLLa/plasma-drop", # fallback for pre-1.9.0 tags, which have no packslip manifest
+]
+bins = ["plasma-drop"]
+os = ["linux"] # only a linux-x64 build is published today
+test = { cmd = "plasma-drop --version", expected = "plasma-drop {{version}}" }

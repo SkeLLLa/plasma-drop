@@ -127,50 +127,6 @@ checksum = "sha256:d1e8671f40c89c445aaa1728a21ec04b74be2e5f99091485caeabcc97f99a
 url = "https://github.com/dmtrKovalenko/fff/releases/download/v0.11.0/fff-mcp-x86_64-unknown-linux-musl"
 url_api = "https://api.github.com/repos/dmtrKovalenko/fff/releases/assets/578309693"
 
-[[tools."github:dmtrKovalenko/fff.nvim"]]
-version = "0.11.0"
-backend = "github:dmtrKovalenko/fff.nvim"
-specifiers = ["0.11.0"]
-
-[tools."github:dmtrKovalenko/fff.nvim".options]
-asset_pattern = "fff-mcp-aarch64-unknown-linux-musl"
-
-[tools."github:dmtrKovalenko/fff.nvim"."platforms.linux-arm64"]
-checksum = "sha256:35f8e05d6c865266bf451d13bfa5e1b0d98438fda7dc1c9bdbc1c6a83484577d"
-url = "https://github.com/dmtrKovalenko/fff/releases/download/v0.11.0/fff-mcp-aarch64-unknown-linux-musl"
-url_api = "https://api.github.com/repos/dmtrKovalenko/fff/releases/assets/578309707"
-
-[tools."github:dmtrKovalenko/fff.nvim"."platforms.linux-arm64-musl"]
-checksum = "sha256:35f8e05d6c865266bf451d13bfa5e1b0d98438fda7dc1c9bdbc1c6a83484577d"
-url = "https://github.com/dmtrKovalenko/fff/releases/download/v0.11.0/fff-mcp-aarch64-unknown-linux-musl"
-url_api = "https://api.github.com/repos/dmtrKovalenko/fff/releases/assets/578309707"
-
-[[tools."github:dmtrKovalenko/fff.nvim"]]
-version = "0.11.0"
-backend = "github:dmtrKovalenko/fff.nvim"
-specifiers = ["0.11.0"]
-
-[tools."github:dmtrKovalenko/fff.nvim".options]
-asset_pattern = "fff-mcp-aarch64-apple-darwin"
-
-[tools."github:dmtrKovalenko/fff.nvim"."platforms.macos-arm64"]
-checksum = "sha256:cc606d9418cfa7764376dcd7b32a33e6459a6cb9a4718be366b024dca6e9fead"
-url = "https://github.com/dmtrKovalenko/fff/releases/download/v0.11.0/fff-mcp-aarch64-apple-darwin"
-url_api = "https://api.github.com/repos/dmtrKovalenko/fff/releases/assets/578309710"
-
-[[tools."github:dmtrKovalenko/fff.nvim"]]
-version = "0.11.0"
-backend = "github:dmtrKovalenko/fff.nvim"
-specifiers = ["0.11.0"]
-
-[tools."github:dmtrKovalenko/fff.nvim".options]
-asset_pattern = "fff-mcp-x86_64-apple-darwin"
-
-[tools."github:dmtrKovalenko/fff.nvim"."platforms.macos-x64"]
-checksum = "sha256:33377a8f96442ebc8b06d3bd2863cf66a520f97a33700e0fb85a09dd7988e862"
-url = "https://github.com/dmtrKovalenko/fff/releases/download/v0.11.0/fff-mcp-x86_64-apple-darwin"
-url_api = "https://api.github.com/repos/dmtrKovalenko/fff/releases/assets/578309709"
-
 [[tools."github:jdx/packslip"]]
 version = "1.2.0"
 backend = "github:jdx/packslip"
