@@ -89,44 +89,46 @@ impl ToggleService {
         let target_tracked_window_id = target.tracked_window_id.clone();
         drop(registry);
 
-        let screen_for_show = if target_visible {
-            None
-        } else {
-            Some(self.current_screen().await?)
-        };
-
         if let Some(other) = other_visible {
             self.hide_app(&other).await?;
         }
 
-        let target_visible = if target_visible {
-            let window = self
-                .resolve_existing_window(&target_config, target_tracked_window_id)
-                .await?;
+        // Verifica exatamente quem está com o foco no teclado AGORA
+        let mut has_focus = false;
+        
+        if let Ok(Some(active_win)) = self.kwin.get_active_window().await {
+            if let Ok(Some(konsole_win)) = self.resolve_existing_window(&target_config, target_tracked_window_id.clone()).await {
+                // Se os IDs baterem, significa que o Konsole é a janela em uso
+                if active_win.internal_id.trim() == konsole_win.internal_id.trim() {
+                    has_focus = true;
+                }
+            }
+        }
+
+        if target_visible {
+            let window = self.resolve_existing_window(&target_config, target_tracked_window_id).await?;
             if let Some(window) = window {
                 let mut registry = self.registry.lock().await;
                 if let Some(app) = registry.managed_app_mut(app_name) {
                     app.tracked_window_id = Some(window.internal_id);
                     app.visible = true;
                 }
-                drop(registry);
-                true
             } else {
                 let mut registry = self.registry.lock().await;
                 if let Some(app) = registry.managed_app_mut(app_name) {
                     app.tracked_window_id = None;
                 }
                 registry.set_visible(app_name, false);
-                drop(registry);
-                false
             }
-        } else {
-            false
-        };
+        }
 
-        if target_visible {
+        // LÓGICA DE AÇÃO:
+        // Só esconde se estiver visível E com o foco. 
+        // Em qualquer outro cenário (escondido OU sem foco), ele puxa o Konsole para a frente.
+        if target_visible && has_focus {
             self.hide_app(app_name).await
         } else {
+            let screen_for_show = Some(self.current_screen().await?);
             self.show_app(app_name, screen_for_show).await
         }
     }
@@ -356,13 +358,36 @@ impl ToggleService {
 
     async fn current_screen(&self) -> Result<ScreenInfo> {
         let screens = self.current_screens().await;
-        if let Some(position) = self.kwin.get_cursor_position().await?
-            && let Some(screen) = Self::screen_containing_point(&screens, &position)
-        {
-            return Ok(screen.clone());
+
+        // INÍCIO DA ALTERAÇÃO: Lê o TOML dinamicamente a cada pressionamento da tecla
+        let home = std::env::var("HOME").unwrap_or_else(|_| String::from(""));
+        let config_path = format!("{}/.config/plasma-drop/config.toml", home);
+        
+        if let Ok(config_str) = std::fs::read_to_string(config_path) {
+            for line in config_str.lines() {
+                let trimmed = line.trim();
+                // Ignora comentários e busca a variável screen
+                if trimmed.starts_with("screen") && trimmed.contains('=') {
+                    let parts: Vec<&str> = trimmed.split('"').collect();
+                    if parts.len() >= 3 {
+                        let target_screen = parts[1];
+                        if let Some(screen) = screens.iter().find(|s| s.name == target_screen) {
+                            return Ok(screen.clone());
+                        }
+                    }
+                }
+            }
+        }
+        // FIM DA ALTERAÇÃO
+
+        // Fallback original do desenvolvedor (posição do mouse) caso o cabo desconecte
+        if let Ok(Some(position)) = self.kwin.get_cursor_position().await {
+            if let Some(screen) = Self::screen_containing_point(&screens, &position) {
+                return Ok(screen.clone());
+            }
         }
 
-        if let Some(window) = self.kwin.get_active_window().await? {
+        if let Ok(Some(window)) = self.kwin.get_active_window().await {
             return Ok(Self::screen_for_geometry(&screens, &window.frame_geometry).clone());
         }
 
