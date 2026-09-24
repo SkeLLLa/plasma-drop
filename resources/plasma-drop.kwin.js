@@ -131,8 +131,16 @@ cmds["GET_ACTIVE_WINDOW"] = () => ({
 });
 cmds["GET_CURSOR_POSITION"] = () => ({
     position: (() => {
-        const position =
-            typeof workspace.cursorPos === "function" ? workspace.cursorPos() : workspace.cursorPos;
+        try {
+            // Engana o Rust informando que o mouse está sempre dentro do HDMI
+            const hdmiScreen = workspace.screens.find(s => s.name === "HDMI-A-1");
+            if (hdmiScreen) {
+                return { x: hdmiScreen.geometry.x + 10, y: hdmiScreen.geometry.y + 10 };
+            }
+        } catch (e) {}
+        
+        // Fallback original caso a tela não seja encontrada
+        const position = typeof workspace.cursorPos === "function" ? workspace.cursorPos() : workspace.cursorPos;
         if (!position || typeof position.x !== "number" || typeof position.y !== "number") {
             return null;
         }
@@ -144,6 +152,23 @@ cmds["GET_SUPPORT_INFORMATION"] = () => ({
 });
 cmds["MOVE_WINDOW"] = (params) => {
     const window = kwin.getWindowByInternalIdRequired(params.internalId);
+    
+    try {
+        if (workspace.screens) {
+            const targetScreen = workspace.screens.find(s => 
+                params.x >= s.geometry.x && params.x < (s.geometry.x + s.geometry.width) &&
+                params.y >= s.geometry.y && params.y < (s.geometry.y + s.geometry.height)
+            );
+            if (targetScreen) {
+                if (typeof workspace.sendWindowToOutput === "function") {
+                    workspace.sendWindowToOutput(window, targetScreen);
+                } else if (typeof workspace.sendClientToScreen === "function") {
+                    workspace.sendClientToScreen(window, targetScreen);
+                }
+            }
+        }
+    } catch (e) {}
+
     const geometry = Object.assign({}, window.frameGeometry);
     geometry.x = params.x;
     geometry.y = params.y;
@@ -174,12 +199,22 @@ cmds["SET_WINDOW_NO_BORDER"] = (params) => {
 };
 cmds["MINIMIZE_WINDOW"] = (params) => {
     const window = kwin.getWindowByInternalIdRequired(params.internalId);
-    window.minimized = Boolean(params.minimized);
+    
+    // INTERCEPTAÇÃO: Se o programa mandou esconder, mas o Konsole não está com o foco atual
+    if (workspace.activeWindow !== window) {
+        window.minimized = false;           // Garante que a janela fica visível
+        workspace.activeWindow = window;    // Puxa o foco do teclado para o Konsole
+        return {};                          // Aborta a ordem de minimizar
+    }
+
+    // Se o Konsole já era a janela com foco, minimiza e esconde normalmente
+    window.minimized = true;
     return {};
 };
 cmds["BRING_WINDOW_TO_FOREGROUND"] = (params) => {
     const window = kwin.getWindowByInternalIdRequired(params.internalId);
-    kwin.setActiveWindow(window);
+    window.minimized = false;
+    workspace.activeWindow = window;
     return {};
 };
 cmds["MOVE_WINDOW_TO_CURRENT_DESKTOP"] = (params) => {
