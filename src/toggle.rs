@@ -356,13 +356,36 @@ impl ToggleService {
 
     async fn current_screen(&self) -> Result<ScreenInfo> {
         let screens = self.current_screens().await;
-        if let Some(position) = self.kwin.get_cursor_position().await?
-            && let Some(screen) = Self::screen_containing_point(&screens, &position)
-        {
-            return Ok(screen.clone());
+
+        // INÍCIO DA ALTERAÇÃO: Lê o TOML dinamicamente a cada pressionamento da tecla
+        let home = std::env::var("HOME").unwrap_or_else(|_| String::from(""));
+        let config_path = format!("{}/.config/plasma-drop/config.toml", home);
+        
+        if let Ok(config_str) = std::fs::read_to_string(config_path) {
+            for line in config_str.lines() {
+                let trimmed = line.trim();
+                // Ignora comentários e busca a variável screen
+                if trimmed.starts_with("screen") && trimmed.contains('=') {
+                    let parts: Vec<&str> = trimmed.split('"').collect();
+                    if parts.len() >= 3 {
+                        let target_screen = parts[1];
+                        if let Some(screen) = screens.iter().find(|s| s.name == target_screen) {
+                            return Ok(screen.clone());
+                        }
+                    }
+                }
+            }
+        }
+        // FIM DA ALTERAÇÃO
+
+        // Fallback original do desenvolvedor (posição do mouse) caso o cabo desconecte
+        if let Ok(Some(position)) = self.kwin.get_cursor_position().await {
+            if let Some(screen) = Self::screen_containing_point(&screens, &position) {
+                return Ok(screen.clone());
+            }
         }
 
-        if let Some(window) = self.kwin.get_active_window().await? {
+        if let Ok(Some(window)) = self.kwin.get_active_window().await {
             return Ok(Self::screen_for_geometry(&screens, &window.frame_geometry).clone());
         }
 
