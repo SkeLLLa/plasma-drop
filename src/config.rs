@@ -59,6 +59,7 @@ pub struct PlacementConfig {
     pub position: PlacementPosition,
     pub offset_x: PlacementMetric,
     pub offset_y: PlacementMetric,
+    pub screen: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -126,6 +127,7 @@ struct RawPlacementConfig {
     position: Option<String>,
     offset_x: Option<String>,
     offset_y: Option<String>,
+    screen: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -345,6 +347,7 @@ impl PlacementConfig {
                 raw.offset_y.as_deref().unwrap_or("0px"),
                 MetricKind::Offset,
             )?,
+            screen: parse_screen_name(app_name, raw.screen.as_deref())?,
         })
     }
 }
@@ -384,6 +387,7 @@ impl Default for PlacementConfig {
             position: PlacementPosition::TopLeft,
             offset_x: PlacementMetric::Pixels(0),
             offset_y: PlacementMetric::Pixels(0),
+            screen: None,
         }
     }
 }
@@ -500,6 +504,16 @@ fn parse_metric(
         "px" => Ok(PlacementMetric::Pixels(number)),
         _ => unreachable!(),
     }
+}
+
+fn parse_screen_name(app_name: &str, raw: Option<&str>) -> Result<Option<String>> {
+    raw.map(|name| {
+        if name.is_empty() || name.trim() != name {
+            bail!("app '{app_name}' has invalid screen '{name}'");
+        }
+        Ok(name.to_string())
+    })
+    .transpose()
 }
 
 #[cfg(test)]
@@ -702,6 +716,7 @@ mod tests {
             position: Some("right".into()),
             offset_x: Some("-2%".into()),
             offset_y: Some("16px".into()),
+            screen: None,
         });
 
         let config = Config::from_raw(make_raw(vec![raw])).unwrap();
@@ -730,6 +745,7 @@ mod tests {
             position: None,
             offset_x: None,
             offset_y: None,
+            screen: None,
         });
 
         let err = Config::from_raw(make_raw(vec![raw])).unwrap_err();
@@ -745,6 +761,7 @@ mod tests {
             position: None,
             offset_x: None,
             offset_y: None,
+            screen: None,
         });
 
         let err = Config::from_raw(make_raw(vec![raw])).unwrap_err();
@@ -760,6 +777,7 @@ mod tests {
             position: None,
             offset_x: None,
             offset_y: None,
+            screen: None,
         });
 
         let err = Config::from_raw(make_raw(vec![raw])).unwrap_err();
@@ -775,10 +793,52 @@ mod tests {
             position: Some("right-half".into()),
             offset_x: None,
             offset_y: None,
+            screen: None,
         });
 
         let err = Config::from_raw(make_raw(vec![raw])).unwrap_err();
         assert!(err.to_string().contains("invalid position"));
+    }
+
+    #[test]
+    fn parses_screen_per_app() {
+        let raw: RawConfig = toml::from_str(
+            r#"
+            [[app]]
+            name = "terminal"
+            hotkey = "ctrl+grave"
+            filename = "konsole"
+
+            [app.placement]
+            screen = 'eDP-1'
+
+            [[app]]
+            name = "files"
+            hotkey = "super+f9"
+            filename = "dolphin"
+            "#,
+        )
+        .unwrap();
+
+        let config = Config::from_raw(raw).unwrap();
+        assert_eq!(config.apps[0].placement.screen.as_deref(), Some("eDP-1"));
+        assert_eq!(config.apps[1].placement.screen, None);
+    }
+
+    #[test]
+    fn rejects_blank_screen() {
+        let mut raw = app("terminal", "ctrl+grave");
+        raw.placement = Some(super::RawPlacementConfig {
+            width: None,
+            height: None,
+            position: None,
+            offset_x: None,
+            offset_y: None,
+            screen: Some(" ".into()),
+        });
+
+        let err = Config::from_raw(make_raw(vec![raw])).unwrap_err();
+        assert!(err.to_string().contains("invalid screen"));
     }
 
     #[test]

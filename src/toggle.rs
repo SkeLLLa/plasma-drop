@@ -92,7 +92,7 @@ impl ToggleService {
         let screen_for_show = if target_visible {
             None
         } else {
-            Some(self.current_screen().await?)
+            Some(self.current_screen(&target_config).await?)
         };
 
         if let Some(other) = other_visible {
@@ -189,7 +189,7 @@ impl ToggleService {
 
         let screen = match preferred_screen {
             Some(screen) => screen,
-            None => self.current_screen().await?.clone(),
+            None => self.current_screen(&config).await?,
         };
         screen
             .validate_placement(&config.placement)
@@ -354,38 +354,27 @@ impl ToggleService {
         }
     }
 
-    async fn current_screen(&self) -> Result<ScreenInfo> {
+    /// Returns the screen configured in `placement.screen` when it is connected, otherwise the
+    /// screen under the cursor, then the screen of the active window.
+    async fn current_screen(&self, config: &AppConfig) -> Result<ScreenInfo> {
         let screens = self.current_screens().await;
-
-        // INÍCIO DA ALTERAÇÃO: Lê o TOML dinamicamente a cada pressionamento da tecla
-        let home = std::env::var("HOME").unwrap_or_else(|_| String::from(""));
-        let config_path = format!("{}/.config/plasma-drop/config.toml", home);
-        
-        if let Ok(config_str) = std::fs::read_to_string(config_path) {
-            for line in config_str.lines() {
-                let trimmed = line.trim();
-                // Ignora comentários e busca a variável screen
-                if trimmed.starts_with("screen") && trimmed.contains('=') {
-                    let parts: Vec<&str> = trimmed.split('"').collect();
-                    if parts.len() >= 3 {
-                        let target_screen = parts[1];
-                        if let Some(screen) = screens.iter().find(|s| s.name == target_screen) {
-                            return Ok(screen.clone());
-                        }
-                    }
-                }
-            }
-        }
-        // FIM DA ALTERAÇÃO
-
-        // Fallback original do desenvolvedor (posição do mouse) caso o cabo desconecte
-        if let Ok(Some(position)) = self.kwin.get_cursor_position().await {
-            if let Some(screen) = Self::screen_containing_point(&screens, &position) {
+        if let Some(name) = config.placement.screen.as_deref() {
+            if let Some(screen) = screens.iter().find(|screen| screen.name == name) {
                 return Ok(screen.clone());
             }
+            warn!(
+                "screen '{name}' configured for app '{}' was not found; using the screen under the cursor",
+                config.name
+            );
         }
 
-        if let Ok(Some(window)) = self.kwin.get_active_window().await {
+        if let Some(position) = self.kwin.get_cursor_position().await?
+            && let Some(screen) = Self::screen_containing_point(&screens, &position)
+        {
+            return Ok(screen.clone());
+        }
+
+        if let Some(window) = self.kwin.get_active_window().await? {
             return Ok(Self::screen_for_geometry(&screens, &window.frame_geometry).clone());
         }
 
@@ -973,6 +962,62 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn toggle_on_prefers_configured_screen_over_cursor() {
+        let mut app = app("dolphin", "super+f9", "dolphin");
+        app.placement.screen = Some("top".into());
+        let managed = managed_app(app, "{abc}", false);
+        let registry = Arc::new(Mutex::new(AppRegistry::new(vec![managed])));
+        let kwin = mock_kwin(Some(window(
+            "{abc}",
+            "dolphin",
+            "Dolphin",
+            geometry(10, 20, 300, 400),
+        )));
+        *kwin.cursor_position.lock().await = Some(Point { x: 500, y: 500 });
+        let service = ToggleService::new(registry, kwin.clone(), stacked_screens());
+
+        service.toggle_app("dolphin").await.unwrap();
+
+        let calls = kwin.calls.lock().await.clone();
+        assert_eq!(
+            calls,
+            vec![
+                "move:{abc}:0:-1080:1920:1080".to_string(),
+                "resize:{abc}:0:-1080:1920:1080".to_string(),
+                "foreground:{abc}".to_string()
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn toggle_on_uses_cursor_screen_when_configured_screen_is_missing() {
+        let mut app = app("dolphin", "super+f9", "dolphin");
+        app.placement.screen = Some("HDMI-A-1".into());
+        let managed = managed_app(app, "{abc}", false);
+        let registry = Arc::new(Mutex::new(AppRegistry::new(vec![managed])));
+        let kwin = mock_kwin(Some(window(
+            "{abc}",
+            "dolphin",
+            "Dolphin",
+            geometry(10, 20, 300, 400),
+        )));
+        *kwin.cursor_position.lock().await = Some(Point { x: 500, y: -500 });
+        let service = ToggleService::new(registry, kwin.clone(), stacked_screens());
+
+        service.toggle_app("dolphin").await.unwrap();
+
+        let calls = kwin.calls.lock().await.clone();
+        assert_eq!(
+            calls,
+            vec![
+                "move:{abc}:0:-1080:1920:1080".to_string(),
+                "resize:{abc}:0:-1080:1920:1080".to_string(),
+                "foreground:{abc}".to_string()
+            ]
+        );
+    }
+
+    #[tokio::test]
     async fn toggle_on_refreshes_screens_after_external_display_disconnect() {
         let managed = managed_app(app("dolphin", "super+f9", "dolphin"), "{abc}", false);
         let registry = Arc::new(Mutex::new(AppRegistry::new(vec![managed])));
@@ -1085,6 +1130,7 @@ mod tests {
                 position: PlacementPosition::Left,
                 offset_x: PlacementMetric::Pixels(0),
                 offset_y: PlacementMetric::Pixels(0),
+                screen: None,
             },
         );
         let right = make_app(
@@ -1096,6 +1142,7 @@ mod tests {
                 position: PlacementPosition::Right,
                 offset_x: PlacementMetric::Pixels(0),
                 offset_y: PlacementMetric::Pixels(0),
+                screen: None,
             },
         );
 
@@ -1134,6 +1181,7 @@ mod tests {
             position: PlacementPosition::Right,
             offset_x: PlacementMetric::Pixels(0),
             offset_y: PlacementMetric::Pixels(0),
+            screen: None,
         };
         let managed = managed_app(app, "{abc}", true);
         let registry = Arc::new(Mutex::new(AppRegistry::new(vec![managed])));
@@ -1280,6 +1328,7 @@ mod tests {
             position: PlacementPosition::Right,
             offset_x: PlacementMetric::Pixels(0),
             offset_y: PlacementMetric::Pixels(0),
+            screen: None,
         };
         let managed = managed_app(app, "{abc}", true);
         let registry = Arc::new(Mutex::new(AppRegistry::new(vec![managed])));
@@ -1312,6 +1361,7 @@ mod tests {
             position: PlacementPosition::Right,
             offset_x: PlacementMetric::Pixels(0),
             offset_y: PlacementMetric::Pixels(0),
+            screen: None,
         };
         let managed = managed_app(app, "{abc}", true);
         let registry = Arc::new(Mutex::new(AppRegistry::new(vec![managed])));
@@ -1380,6 +1430,7 @@ mod tests {
             position: PlacementPosition::Left,
             offset_x: PlacementMetric::Pixels(0),
             offset_y: PlacementMetric::Pixels(0),
+            screen: None,
         };
         let managed = managed_app(app, "{stale}", true);
         let registry = Arc::new(Mutex::new(AppRegistry::new(vec![managed])));
