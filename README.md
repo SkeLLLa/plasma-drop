@@ -203,7 +203,7 @@ Common fields:
 | `hide_decorations`   | Hide the KWin title bar and border while managed                   |
 | `hide_behavior`      | `offscreen` (default) or KWin `minimize` when hidden               |
 | `hide_on_focus_lost` | Hide after focus moves to another window                           |
-| `[app.placement]`    | Width, height, position, and offsets                               |
+| `[app.placement]`    | Width, height, position, offsets, and target screen                |
 | `[app.animation]`    | Optional slide/fade behavior                                       |
 
 Focus-loss hiding is event-driven through `KWin`

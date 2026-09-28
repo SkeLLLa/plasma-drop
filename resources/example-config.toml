@@ -18,6 +18,8 @@ follow_current_desktop = true
 width = "50%"
 height = "100%"
 position = "left"
+# Always show on this output instead of the screen under the cursor (`kscreen-doctor -o` lists them).
+# screen = "eDP-1"
 
 [app.animation]
 style = "slide"

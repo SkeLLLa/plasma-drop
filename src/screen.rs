@@ -282,6 +282,7 @@ Geometry: -1920,-1080,1920x1080
             position: PlacementPosition::Right,
             offset_x: PlacementMetric::Pixels(0),
             offset_y: PlacementMetric::Pixels(0),
+            screen: None,
         });
         assert_eq!(
             (rect.x, rect.y, rect.width, rect.height),
@@ -297,6 +298,7 @@ Geometry: -1920,-1080,1920x1080
             position: PlacementPosition::TopRight,
             offset_x: PlacementMetric::Pixels(0),
             offset_y: PlacementMetric::Pixels(0),
+            screen: None,
         });
         assert_eq!(
             (rect.x, rect.y, rect.width, rect.height),
@@ -312,6 +314,7 @@ Geometry: -1920,-1080,1920x1080
             position: PlacementPosition::Bottom,
             offset_x: PlacementMetric::Pixels(0),
             offset_y: PlacementMetric::Pixels(0),
+            screen: None,
         });
         assert_eq!(
             (rect.x, rect.y, rect.width, rect.height),
@@ -327,6 +330,7 @@ Geometry: -1920,-1080,1920x1080
             position: PlacementPosition::Center,
             offset_x: PlacementMetric::Pixels(0),
             offset_y: PlacementMetric::Pixels(0),
+            screen: None,
         });
         assert_eq!(
             (rect.x, rect.y, rect.width, rect.height),
@@ -342,6 +346,7 @@ Geometry: -1920,-1080,1920x1080
             position: PlacementPosition::Center,
             offset_x: PlacementMetric::Pixels(24),
             offset_y: PlacementMetric::Pixels(12),
+            screen: None,
         });
         assert_eq!((rect.x, rect.y), (408, 174));
     }
@@ -354,6 +359,7 @@ Geometry: -1920,-1080,1920x1080
             position: PlacementPosition::TopLeft,
             offset_x: PlacementMetric::Pixels(20),
             offset_y: PlacementMetric::Pixels(12),
+            screen: None,
         });
         assert_eq!(
             (rect.x, rect.y, rect.width, rect.height),
@@ -369,6 +375,7 @@ Geometry: -1920,-1080,1920x1080
             position: PlacementPosition::BottomRight,
             offset_x: PlacementMetric::Pixels(-20),
             offset_y: PlacementMetric::Pixels(-12),
+            screen: None,
         });
         assert_eq!(
             (rect.x, rect.y, rect.width, rect.height),
@@ -384,6 +391,7 @@ Geometry: -1920,-1080,1920x1080
             position: PlacementPosition::TopLeft,
             offset_x: PlacementMetric::Pixels(20),
             offset_y: PlacementMetric::Pixels(12),
+            screen: None,
         });
         assert_eq!(
             (rect.x, rect.y, rect.width, rect.height),
@@ -399,6 +407,7 @@ Geometry: -1920,-1080,1920x1080
             position: PlacementPosition::TopLeft,
             offset_x: PlacementMetric::Pixels(20),
             offset_y: PlacementMetric::Pixels(12),
+            screen: None,
         });
         assert_eq!(
             (rect.x, rect.y, rect.width, rect.height),
@@ -414,6 +423,7 @@ Geometry: -1920,-1080,1920x1080
             position: PlacementPosition::Center,
             offset_x: PlacementMetric::Percent(-2),
             offset_y: PlacementMetric::Percent(-2),
+            screen: None,
         });
         assert_eq!((rect.x, rect.y), (346, 141));
     }
@@ -426,6 +436,7 @@ Geometry: -1920,-1080,1920x1080
             position: PlacementPosition::TopLeft,
             offset_x: PlacementMetric::Pixels(2000),
             offset_y: PlacementMetric::Pixels(-100),
+            screen: None,
         });
         assert_eq!(
             (rect.x, rect.y, rect.width, rect.height),
@@ -442,6 +453,7 @@ Geometry: -1920,-1080,1920x1080
                 position: PlacementPosition::TopLeft,
                 offset_x: PlacementMetric::Pixels(0),
                 offset_y: PlacementMetric::Pixels(0),
+                screen: None,
             })
             .unwrap_err();
         assert!(err.to_string().contains("exceeds screen width"));
@@ -456,6 +468,7 @@ Geometry: -1920,-1080,1920x1080
                 position: PlacementPosition::TopLeft,
                 offset_x: PlacementMetric::Pixels(0),
                 offset_y: PlacementMetric::Pixels(0),
+                screen: None,
             })
             .unwrap_err();
         assert!(err.to_string().contains("exceeds screen height"));
@@ -478,6 +491,7 @@ Geometry: -1920,-1080,1920x1080
                 position: PlacementPosition::TopLeft,
                 offset_x: PlacementMetric::Pixels(0),
                 offset_y: PlacementMetric::Pixels(0),
+                screen: None,
             })
             .unwrap_err();
         assert!(err.to_string().contains("must be at least 1"));

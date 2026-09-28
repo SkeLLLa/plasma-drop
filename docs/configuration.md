@@ -125,7 +125,17 @@ Supported metrics:
 
 Offsets are applied before final screen clipping, so a `100%` width with `offset_x = "20px"` resolves to the shifted visible area rather than keeping the full screen width.
 
-Placement is resolved relative to screen `0` in the current implementation.
+Placement is resolved relative to the screen the app is shown on: the screen under the cursor, or the screen of the active window when the cursor position is unavailable.
+
+To always show an app on one output, set `screen` to the output name, for example `eDP-1`, `HDMI-A-1`, or `DP-2`. `kscreen-doctor -o` lists the connected outputs. If that output is not connected, the app falls back to the screen under the cursor.
+
+```toml
+[app.placement]
+screen = "eDP-1"
+width = "95%"
+height = "98%"
+position = "top"
+```
 
 ## Animation
 
