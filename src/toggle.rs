@@ -89,47 +89,60 @@ impl ToggleService {
         let target_tracked_window_id = target.tracked_window_id.clone();
         drop(registry);
 
+        let screen_for_show = if target_visible {
+            None
+        } else {
+            Some(self.current_screen().await?)
+        };
+
+        // Read before hiding another app, which can change the active window.
+        let active_window_id = if target_visible && target_config.focus_before_hide {
+            self.kwin
+                .get_active_window()
+                .await?
+                .map(|window| window.internal_id)
+        } else {
+            None
+        };
+
         if let Some(other) = other_visible {
             self.hide_app(&other).await?;
         }
 
-        // Verifica exatamente quem está com o foco no teclado AGORA
-        let mut has_focus = false;
-        
-        if let Ok(Some(active_win)) = self.kwin.get_active_window().await {
-            if let Ok(Some(konsole_win)) = self.resolve_existing_window(&target_config, target_tracked_window_id.clone()).await {
-                // Se os IDs baterem, significa que o Konsole é a janela em uso
-                if active_win.internal_id.trim() == konsole_win.internal_id.trim() {
-                    has_focus = true;
-                }
-            }
-        }
-
-        if target_visible {
-            let window = self.resolve_existing_window(&target_config, target_tracked_window_id).await?;
+        let visible_window = if target_visible {
+            let window = self
+                .resolve_existing_window(&target_config, target_tracked_window_id)
+                .await?;
             if let Some(window) = window {
                 let mut registry = self.registry.lock().await;
                 if let Some(app) = registry.managed_app_mut(app_name) {
-                    app.tracked_window_id = Some(window.internal_id);
+                    app.tracked_window_id = Some(window.internal_id.clone());
                     app.visible = true;
                 }
+                drop(registry);
+                Some(window)
             } else {
                 let mut registry = self.registry.lock().await;
                 if let Some(app) = registry.managed_app_mut(app_name) {
                     app.tracked_window_id = None;
                 }
                 registry.set_visible(app_name, false);
+                drop(registry);
+                None
             }
-        }
-
-        // LÓGICA DE AÇÃO:
-        // Só esconde se estiver visível E com o foco. 
-        // Em qualquer outro cenário (escondido OU sem foco), ele puxa o Konsole para a frente.
-        if target_visible && has_focus {
-            self.hide_app(app_name).await
         } else {
-            let screen_for_show = Some(self.current_screen().await?);
-            self.show_app(app_name, screen_for_show).await
+            None
+        };
+
+        match visible_window {
+            Some(window)
+                if target_config.focus_before_hide
+                    && active_window_id.as_deref() != Some(window.internal_id.as_str()) =>
+            {
+                self.focus_app(app_name, &target_config, &window).await
+            }
+            Some(_) => self.hide_app(app_name).await,
+            None => self.show_app(app_name, screen_for_show).await,
         }
     }
 
@@ -226,6 +239,25 @@ impl ToggleService {
         registry.set_visible(app_name, true);
         drop(registry);
         info!("showed app '{app_name}'");
+        Ok(())
+    }
+
+    /// Activates an already visible window in place, without replaying the show animation.
+    async fn focus_app(
+        &self,
+        app_name: &str,
+        config: &AppConfig,
+        window: &ManagedWindow,
+    ) -> Result<()> {
+        if config.follow_current_desktop {
+            self.kwin
+                .move_window_to_current_desktop(&window.internal_id)
+                .await?;
+        }
+        self.kwin
+            .bring_window_to_foreground(&window.internal_id)
+            .await?;
+        info!("focused app '{app_name}'");
         Ok(())
     }
 
@@ -358,36 +390,13 @@ impl ToggleService {
 
     async fn current_screen(&self) -> Result<ScreenInfo> {
         let screens = self.current_screens().await;
-
-        // INÍCIO DA ALTERAÇÃO: Lê o TOML dinamicamente a cada pressionamento da tecla
-        let home = std::env::var("HOME").unwrap_or_else(|_| String::from(""));
-        let config_path = format!("{}/.config/plasma-drop/config.toml", home);
-        
-        if let Ok(config_str) = std::fs::read_to_string(config_path) {
-            for line in config_str.lines() {
-                let trimmed = line.trim();
-                // Ignora comentários e busca a variável screen
-                if trimmed.starts_with("screen") && trimmed.contains('=') {
-                    let parts: Vec<&str> = trimmed.split('"').collect();
-                    if parts.len() >= 3 {
-                        let target_screen = parts[1];
-                        if let Some(screen) = screens.iter().find(|s| s.name == target_screen) {
-                            return Ok(screen.clone());
-                        }
-                    }
-                }
-            }
-        }
-        // FIM DA ALTERAÇÃO
-
-        // Fallback original do desenvolvedor (posição do mouse) caso o cabo desconecte
-        if let Ok(Some(position)) = self.kwin.get_cursor_position().await {
-            if let Some(screen) = Self::screen_containing_point(&screens, &position) {
-                return Ok(screen.clone());
-            }
+        if let Some(position) = self.kwin.get_cursor_position().await?
+            && let Some(screen) = Self::screen_containing_point(&screens, &position)
+        {
+            return Ok(screen.clone());
         }
 
-        if let Ok(Some(window)) = self.kwin.get_active_window().await {
+        if let Some(window) = self.kwin.get_active_window().await? {
             return Ok(Self::screen_for_geometry(&screens, &window.frame_geometry).clone());
         }
 
@@ -775,6 +784,7 @@ mod tests {
             hide_decorations: false,
             hide_behavior: HideBehavior::Offscreen,
             hide_on_focus_lost: false,
+            focus_before_hide: false,
             follow_current_desktop: false,
             placement: PlacementConfig::default(),
             animation: AnimationConfig::default(),
@@ -1270,6 +1280,128 @@ mod tests {
                 .managed_app("dolphin")
                 .unwrap()
                 .visible
+        );
+    }
+
+    #[tokio::test]
+    async fn toggle_focuses_visible_unfocused_app_when_focus_before_hide() {
+        let mut app = app("dolphin", "super+f9", "dolphin");
+        app.focus_before_hide = true;
+        let managed = managed_app(app, "{abc}", true);
+        let registry = Arc::new(Mutex::new(AppRegistry::new(vec![managed])));
+        registry.lock().await.set_visible("dolphin", true);
+        let kwin = mock_kwin(Some(window(
+            "{abc}",
+            "dolphin",
+            "Dolphin",
+            geometry(0, 0, 1920, 1080),
+        )));
+        *kwin.active_window.lock().await = Some(window(
+            "{other}",
+            "konsole",
+            "Konsole",
+            geometry(0, 0, 800, 600),
+        ));
+        let service = ToggleService::new(registry.clone(), kwin.clone(), vec![screen()]);
+
+        service.toggle_app("dolphin").await.unwrap();
+
+        assert_eq!(
+            *kwin.calls.lock().await,
+            vec!["foreground:{abc}".to_string()]
+        );
+        assert!(
+            registry
+                .lock()
+                .await
+                .managed_app("dolphin")
+                .unwrap()
+                .visible
+        );
+    }
+
+    #[tokio::test]
+    async fn toggle_focus_moves_window_to_current_desktop_when_following() {
+        let mut app = app("dolphin", "super+f9", "dolphin");
+        app.focus_before_hide = true;
+        app.follow_current_desktop = true;
+        let managed = managed_app(app, "{abc}", true);
+        let registry = Arc::new(Mutex::new(AppRegistry::new(vec![managed])));
+        registry.lock().await.set_visible("dolphin", true);
+        let kwin = mock_kwin(Some(window(
+            "{abc}",
+            "dolphin",
+            "Dolphin",
+            geometry(0, 0, 1920, 1080),
+        )));
+        let service = ToggleService::new(registry, kwin.clone(), vec![screen()]);
+
+        service.toggle_app("dolphin").await.unwrap();
+
+        assert_eq!(
+            *kwin.calls.lock().await,
+            vec!["desktop:{abc}".to_string(), "foreground:{abc}".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn toggle_hides_visible_focused_app_when_focus_before_hide() {
+        let mut app = app("dolphin", "super+f9", "dolphin");
+        app.focus_before_hide = true;
+        let managed = managed_app(app, "{abc}", true);
+        let registry = Arc::new(Mutex::new(AppRegistry::new(vec![managed])));
+        registry.lock().await.set_visible("dolphin", true);
+        let active = window("{abc}", "dolphin", "Dolphin", geometry(0, 0, 1920, 1080));
+        let kwin = mock_kwin(Some(active.clone()));
+        *kwin.active_window.lock().await = Some(active);
+        let service = ToggleService::new(registry.clone(), kwin.clone(), vec![screen()]);
+
+        service.toggle_app("dolphin").await.unwrap();
+
+        assert_eq!(
+            *kwin.calls.lock().await,
+            vec![
+                "resize:{abc}:0:-1080:1920:1080".to_string(),
+                "move:{abc}:0:-1080:1920:1080".to_string(),
+            ]
+        );
+        assert!(
+            !registry
+                .lock()
+                .await
+                .managed_app("dolphin")
+                .unwrap()
+                .visible
+        );
+    }
+
+    #[tokio::test]
+    async fn toggle_hides_visible_unfocused_app_by_default() {
+        let managed = managed_app(app("dolphin", "super+f9", "dolphin"), "{abc}", true);
+        let registry = Arc::new(Mutex::new(AppRegistry::new(vec![managed])));
+        registry.lock().await.set_visible("dolphin", true);
+        let kwin = mock_kwin(Some(window(
+            "{abc}",
+            "dolphin",
+            "Dolphin",
+            geometry(0, 0, 1920, 1080),
+        )));
+        *kwin.active_window.lock().await = Some(window(
+            "{other}",
+            "konsole",
+            "Konsole",
+            geometry(0, 0, 800, 600),
+        ));
+        let service = ToggleService::new(registry, kwin.clone(), vec![screen()]);
+
+        service.toggle_app("dolphin").await.unwrap();
+
+        assert_eq!(
+            *kwin.calls.lock().await,
+            vec![
+                "resize:{abc}:0:-1080:1920:1080".to_string(),
+                "move:{abc}:0:-1080:1920:1080".to_string(),
+            ]
         );
     }
 
