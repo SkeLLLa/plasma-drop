@@ -235,6 +235,19 @@ mise install
 mise run build
 ```
 
+For a release binary, use the release task:
+
+```bash
+mise run build-release
+```
+
+The release binary is written to `target/release/plasma-drop`.
+
+Mise routes these Cargo commands through Mr Boxington, which reuses compiled Rust work across builds
+on this machine. The first build fills the cache; later matching builds can reuse it. Use `mise run`
+or `mise exec` when you want this cache. The Make targets and GitHub Actions continue to use regular
+Cargo commands and do not require mise or Mr Boxington.
+
 Run the full local quality suite with either task runner:
 
 ```bash
@@ -247,6 +260,7 @@ Common project scripts:
 | Task         | Make                         | mise                                 |
 | ------------ | ---------------------------- | ------------------------------------ |
 | Build        | `make build`                 | `mise run build`                     |
+| Release build | —                           | `mise run build-release`             |
 | Format       | `make fmt`                   | `mise run fmt`                       |
 | Check format | `make fmt-check`             | `mise run fmt-check`                 |
 | Lint         | `make lint` or `make clippy` | `mise run lint` or `mise run clippy` |
@@ -254,7 +268,7 @@ Common project scripts:
 | Docs         | `make doc`                   | `mise run doc`                       |
 | Full check   | `make check`                 | `mise run check`                     |
 
-Both runners delegate to the same Cargo commands.
+Both runners use the same Cargo operations; mise also enables the Mr Boxington build cache.
 
 ## Distribution and Releases
 
