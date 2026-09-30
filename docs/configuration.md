@@ -28,6 +28,7 @@ The effective log level is resolved with the following priority (highest first):
 - `hide_behavior`: optional `offscreen` (default) or `minimize`; determines whether hiding parks the window outside the screens or uses `KWin`'s minimized state
 - `hide_on_focus_lost`: optional boolean; hide the managed app when another window becomes active. Defaults to `false`.
 - `follow_current_desktop`: optional boolean; when the app is shown, move its window onto the virtual desktop you are currently viewing. Defaults to `false`.
+- `focus_before_hide`: optional boolean; when the app is visible but another window has focus, the hotkey focuses the app instead of hiding it. Defaults to `false`.
 
 ## Matching Behavior
 
@@ -61,6 +62,8 @@ plasma-drop records the window's original decoration state when it attaches and 
 `hide_behavior = "minimize"` uses `KWin` minimization instead. The window is restored before it is shown again, but minimizing hides immediately and skips every hide animation. A `fade` animation can still fade the restored window in. `slide` and `slide-fade` run only on show and may briefly display the restored window at its old position before moving it to the off-screen animation start. Use `offscreen` for symmetric, flicker-free slide animations.
 
 Set `hide_on_focus_lost = true` for a drop-down-terminal-style window. plasma-drop listens to `KWin` activation events and hides the app when another window becomes active.
+
+If the app stays visible after losing focus, the hotkey hides it by default. Set `focus_before_hide = true` to make the hotkey focus the visible app first; the next press hides it. With `follow_current_desktop = true`, the window is also moved onto the current virtual desktop when it is focused.
 
 Off-screen sliding:
 
