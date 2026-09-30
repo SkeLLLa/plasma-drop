@@ -18,7 +18,8 @@ shfmt = "3.14.1"
 "github:jdx/packslip" = "1.2.0"
 rtk = { version = "0.49.0", postinstall = "rtk init -g --claude && rtk init -g --codex" }
 "npm:context-mode" = "1.0.169"
-rust = { version = "1.98.1", components = "rust-analyzer,rust-src" }
+rust = { version = "1.98.1", components = "rust-analyzer,rust-src", mr_boxington = true }
+mr-boxington = "1.16.0"
 cargo-binstall = "1.23.0"
 "cargo:cargo-deb" = "3.8.0"
 "cargo:cargo-generate-rpm" = "0.21.0"
@@ -29,6 +30,10 @@ command -v claude >/dev/null && claude mcp remove fff -s user 2>/dev/null; comma
 [tasks.build]
 description = "Build the Rust project"
 run = "cargo build"
+
+[tasks.build-release]
+description = "Build the optimized release binary"
+run = "cargo build --release --locked"
 
 [tasks.fmt]
 description = "Format Rust sources"
