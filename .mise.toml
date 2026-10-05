@@ -12,15 +12,15 @@ node = "26.10.0"
 rg = "15.2.0"
 fd = "10.5.0"
 jq = "1.8.2"
-yq = "4.53.6"
+yq = "4.54.1"
 shellcheck = "0.11.0"
 shfmt = "3.14.1"
-"github:jdx/packslip" = "1.2.0"
-rtk = { version = "0.49.0", postinstall = "rtk init -g --claude && rtk init -g --codex" }
+"github:jdx/packslip" = "1.6.0"
+rtk = { version = "0.51.0", postinstall = "rtk init -g --claude && rtk init -g --codex" }
 "npm:context-mode" = "1.0.169"
-rust = { version = "1.98.1", components = "rust-analyzer,rust-src", mr_boxington = true }
+rust = { version = "1.99.0", components = "rust-analyzer,rust-src", mr_boxington = true }
 mr-boxington = "1.16.0"
-cargo-binstall = "1.23.0"
+cargo-binstall = "1.25.1"
 "cargo:cargo-deb" = "3.8.0"
 "cargo:cargo-generate-rpm" = "0.21.0"
 "github:dmtrKovalenko/fff.nvim"= { version = "0.11.0", exe = "fff-mcp", postinstall = """

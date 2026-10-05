@@ -38,15 +38,54 @@ If you need a GUI, a Windows version, or a broader configuration surface, use th
 
 ## Install
 
-Choose one install path.
+Pick one install method. All of them target Linux `x86_64`.
 
-### From the GitHub Pages Package Repositories
+| Method | Command | Service unit and example config |
+| --- | --- | --- |
+| Fedora / RPM | [DNF repository](#rpm-and-apt-repositories), then `sudo dnf install plasma-drop` | Installed by the package |
+| Debian / Ubuntu | [APT repository](#rpm-and-apt-repositories), then `sudo apt install plasma-drop` | Installed by the package |
+| Any (Rust) | `cargo install --locked plasma-drop` | `plasma-drop init --systemd` |
+| mise | `mise use -g github:SkeLLLa/plasma-drop` | `plasma-drop init --systemd` |
+| packslip | `packslip install github.com/SkeLLLa/plasma-drop --pin ps1_4yd5vxao3lfzaox72lynxuotke` | `plasma-drop init --systemd` |
+| Release archive | Extract the [release](https://github.com/SkeLLLa/plasma-drop/releases/latest) `tar.gz`, run `./install-user.sh` | Installed by the script |
 
-Use this if you want updates through your system package manager.
-
-For Fedora, openSUSE, and other RPM-based systems:
+Then finish setup for your method:
 
 ```bash
+# Package repositories or a downloaded deb/rpm:
+mkdir -p ~/.config/plasma-drop
+cp /usr/share/plasma-drop/examples/config.toml ~/.config/plasma-drop/config.toml
+
+# cargo, mise, or packslip: writes ~/.config/plasma-drop/config.toml and
+# ~/.config/systemd/user/plasma-drop.service (use `plasma-drop init` to skip the unit)
+plasma-drop init --systemd
+
+# Every method:
+systemctl --user daemon-reload
+systemctl --user enable --now plasma-drop.service
+```
+
+Notes:
+
+- **mise:** append `@<version>` to pin a release. Releases from 1.9.0 on also publish a signed
+  `packslip.sigstore.json` manifest; `mise use -g packslip:github.com/SkeLLLa/plasma-drop`
+  installs through it.
+- **packslip:** [packslip](https://packslip.dev) verifies the signed release manifest before
+  installing into `~/.local/bin`; add `--version <version>` to pin a release. The `--pin`
+  fingerprint identifies this repository's release workflow and stays the same across releases;
+  check it against this README rather than trusting it on first use.
+- **Release archive:** `install-user.sh` places the binary in `~/.local/bin`, copies the starter
+  config, and installs the user service. The same release page has standalone `deb` and `rpm`
+  files.
+- Native packages install `/usr/bin/plasma-drop`, `/usr/lib/systemd/user/plasma-drop.service`,
+  and `/usr/share/plasma-drop/examples/config.toml`.
+
+### RPM and APT repositories
+
+These repositories are unsigned; they track every release.
+
+```bash
+# Fedora, openSUSE, other RPM-based systems
 sudo tee /etc/yum.repos.d/plasma-drop.repo >/dev/null <<'EOF'
 [plasma-drop]
 name=plasma-drop
@@ -56,88 +95,11 @@ gpgcheck=0
 repo_gpgcheck=0
 EOF
 sudo dnf install plasma-drop
-```
 
-For Debian, Ubuntu, and other APT-based systems:
-
-```bash
+# Debian, Ubuntu, other APT-based systems
 echo 'deb [trusted=yes] https://skellla.github.io/plasma-drop/deb stable main' | sudo tee /etc/apt/sources.list.d/plasma-drop.list
 sudo apt update
 sudo apt install plasma-drop
-```
-
-Then create your user config and enable the user service:
-
-```bash
-mkdir -p ~/.config/plasma-drop
-cp /usr/share/plasma-drop/examples/config.toml ~/.config/plasma-drop/config.toml
-systemctl --user daemon-reload
-systemctl --user enable --now plasma-drop.service
-```
-
-### From Crates.io
-
-Use this if you already have Rust and Cargo:
-
-```bash
-cargo install --locked plasma-drop
-plasma-drop init --systemd
-systemctl --user daemon-reload
-systemctl --user enable --now plasma-drop.service
-```
-
-`plasma-drop init --systemd` creates:
-
-- `~/.config/plasma-drop/config.toml`
-- `~/.config/systemd/user/plasma-drop.service`
-
-Use `plasma-drop init` instead if you do not want a `systemd --user` service file.
-
-### From a GitHub Release Archive
-
-Download and extract the `tar.gz` release asset, then run:
-
-```bash
-cd plasma-drop-<version>-x86_64-unknown-linux-gnu
-./install-user.sh
-systemctl --user enable --now plasma-drop.service
-```
-
-The installer places the binary in `~/.local/bin`, copies the starter config to
-`~/.config/plasma-drop/config.toml`, and installs a user service for `systemd --user`.
-
-### From `deb` or `rpm`
-
-Install the package with your distro package manager, then create your user config:
-
-```bash
-mkdir -p ~/.config/plasma-drop
-cp /usr/share/plasma-drop/examples/config.toml ~/.config/plasma-drop/config.toml
-systemctl --user daemon-reload
-systemctl --user enable --now plasma-drop.service
-```
-
-The native packages install:
-
-- `/usr/bin/plasma-drop`
-- `/usr/lib/systemd/user/plasma-drop.service`
-- `/usr/share/plasma-drop/examples/config.toml`
-
-### With `mise`
-
-End users can install release builds through `mise`'s GitHub backend:
-
-```bash
-mise use -g github:SkeLLLa/plasma-drop
-plasma-drop init --systemd
-systemctl --user daemon-reload
-systemctl --user enable --now plasma-drop.service
-```
-
-To pin a specific release:
-
-```bash
-mise use -g github:SkeLLLa/plasma-drop@1.0.0
 ```
 
 ## First Run
@@ -295,7 +257,9 @@ The repo release flow is:
 4. `release-plz release` publishes the crate, creates the tag, and creates the GitHub release
 5. The same workflow attaches the `tar.gz`, `deb`, and `rpm` assets to that release
 6. The workflow also attaches `SHA256SUMS` and one `.sha256` checksum sidecar per artifact
-7. The workflow publishes unsigned RPM/APT repository metadata to GitHub Pages
+7. Separate jobs sign a `packslip.sigstore.json` manifest for the `tar.gz`, upload it, and verify
+   the published release against the signer fingerprint above
+8. The workflow publishes unsigned RPM/APT repository metadata to GitHub Pages
 
 Crates.io publishing uses trusted publishing through GitHub Actions OIDC. After the first manual
 crate publish, configure crates.io to trust `SkeLLLa/plasma-drop` and workflow `release.yml`; no

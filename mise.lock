@@ -3,50 +3,50 @@
 lockfile_version = 1
 
 [[tools.cargo-binstall]]
-version = "1.23.0"
+version = "1.25.1"
 backend = "aqua:cargo-bins/cargo-binstall"
-specifiers = ["1.23.0"]
+specifiers = ["1.25.1"]
 
 [tools.cargo-binstall."platforms.linux-arm64"]
-checksum = "sha256:c458cfe9534d1958f159fc17b5f50e839297b4ee752b23ffdd80c5e15a734c42"
-url = "https://github.com/cargo-bins/cargo-binstall/releases/download/v1.23.0/cargo-binstall-aarch64-unknown-linux-gnu.tgz"
-url_api = "https://api.github.com/repos/cargo-bins/cargo-binstall/releases/assets/546062641"
+checksum = "sha256:0c209d4fecaf428358b1a798d35e2372c98a9a5513c541ba08450c2ba1b2bf69"
+url = "https://github.com/cargo-bins/cargo-binstall/releases/download/v1.25.1/cargo-binstall-aarch64-unknown-linux-gnu.tgz"
+url_api = "https://api.github.com/repos/cargo-bins/cargo-binstall/releases/assets/607778085"
 provenance = "github-attestations"
 
 [tools.cargo-binstall."platforms.linux-arm64-musl"]
-checksum = "sha256:ba9b7bf426c7b7375825cd3fa367c3f8a632ca7c6c546fdcb738114b167f4103"
-url = "https://github.com/cargo-bins/cargo-binstall/releases/download/v1.23.0/cargo-binstall-aarch64-unknown-linux-musl.tgz"
-url_api = "https://api.github.com/repos/cargo-bins/cargo-binstall/releases/assets/546062597"
+checksum = "sha256:87495c6a6e921e02dd9ccf4dc8cc0a9b3a8d7ae8a07681f7f99bbcf306f42fdd"
+url = "https://github.com/cargo-bins/cargo-binstall/releases/download/v1.25.1/cargo-binstall-aarch64-unknown-linux-musl.tgz"
+url_api = "https://api.github.com/repos/cargo-bins/cargo-binstall/releases/assets/607777995"
 provenance = "github-attestations"
 
 [tools.cargo-binstall."platforms.linux-x64"]
-checksum = "sha256:cdada45ad6bb501185ab309f5eef3f628b6bc44460746565cb3e0c7538815bf3"
-url = "https://github.com/cargo-bins/cargo-binstall/releases/download/v1.23.0/cargo-binstall-x86_64-unknown-linux-gnu.tgz"
-url_api = "https://api.github.com/repos/cargo-bins/cargo-binstall/releases/assets/546062151"
+checksum = "sha256:7566158bf76a99974e081abe442978b8a3e5f4e834ee8247d847902b588b2133"
+url = "https://github.com/cargo-bins/cargo-binstall/releases/download/v1.25.1/cargo-binstall-x86_64-unknown-linux-gnu.tgz"
+url_api = "https://api.github.com/repos/cargo-bins/cargo-binstall/releases/assets/607777440"
 provenance = "github-attestations"
 
 [tools.cargo-binstall."platforms.linux-x64-musl"]
-checksum = "sha256:64bf954c68bb558431deeabecaec7687edd5541c2189ee263bb8bc18bc4fdf55"
-url = "https://github.com/cargo-bins/cargo-binstall/releases/download/v1.23.0/cargo-binstall-x86_64-unknown-linux-musl.tgz"
-url_api = "https://api.github.com/repos/cargo-bins/cargo-binstall/releases/assets/546062088"
+checksum = "sha256:8e06c41af972f9922f28c6ae467e41ffa9b0688d563d0aabd0dcbd5244ab849b"
+url = "https://github.com/cargo-bins/cargo-binstall/releases/download/v1.25.1/cargo-binstall-x86_64-unknown-linux-musl.tgz"
+url_api = "https://api.github.com/repos/cargo-bins/cargo-binstall/releases/assets/607777371"
 provenance = "github-attestations"
 
 [tools.cargo-binstall."platforms.macos-arm64"]
-checksum = "sha256:0f679c0bc992c6b84fdcbb0f65492588447d26596ef387cb6cb1ba41ad8ceb33"
-url = "https://github.com/cargo-bins/cargo-binstall/releases/download/v1.23.0/cargo-binstall-aarch64-apple-darwin.zip"
-url_api = "https://api.github.com/repos/cargo-bins/cargo-binstall/releases/assets/546062768"
+checksum = "sha256:44fc93543677e08d9e591d7c72a0b0346049ff249816814335da864e588f0413"
+url = "https://github.com/cargo-bins/cargo-binstall/releases/download/v1.25.1/cargo-binstall-aarch64-apple-darwin.zip"
+url_api = "https://api.github.com/repos/cargo-bins/cargo-binstall/releases/assets/607778292"
 provenance = "github-attestations"
 
 [tools.cargo-binstall."platforms.macos-x64"]
-checksum = "sha256:5b4d6cd99651318e17a26ed9bab7505de0f496d88793a7735a0fc6e2079efe83"
-url = "https://github.com/cargo-bins/cargo-binstall/releases/download/v1.23.0/cargo-binstall-x86_64-apple-darwin.zip"
-url_api = "https://api.github.com/repos/cargo-bins/cargo-binstall/releases/assets/546062270"
+checksum = "sha256:0f39bb6dcb534ffe20d5cee7e0c131451eb721ca6c6b962418d1fc1a48d5917d"
+url = "https://github.com/cargo-bins/cargo-binstall/releases/download/v1.25.1/cargo-binstall-x86_64-apple-darwin.zip"
+url_api = "https://api.github.com/repos/cargo-bins/cargo-binstall/releases/assets/607777587"
 provenance = "github-attestations"
 
 [tools.cargo-binstall."platforms.windows-x64"]
-checksum = "sha256:f4641479477aca40387e88297e3813fab8e44a8d21f25faa44e0ff33e2bc1726"
-url = "https://github.com/cargo-bins/cargo-binstall/releases/download/v1.23.0/cargo-binstall-x86_64-pc-windows-msvc.zip"
-url_api = "https://api.github.com/repos/cargo-bins/cargo-binstall/releases/assets/546062212"
+checksum = "sha256:8b8019ac54adbb5338e68c3cd6e37dc48a156747eb9174a9231089ce648c5df3"
+url = "https://github.com/cargo-bins/cargo-binstall/releases/download/v1.25.1/cargo-binstall-x86_64-pc-windows-msvc.zip"
+url_api = "https://api.github.com/repos/cargo-bins/cargo-binstall/releases/assets/607777522"
 provenance = "github-attestations"
 
 [[tools."cargo:cargo-deb"]]
@@ -128,50 +128,50 @@ url = "https://github.com/dmtrKovalenko/fff/releases/download/v0.11.0/fff-mcp-x8
 url_api = "https://api.github.com/repos/dmtrKovalenko/fff/releases/assets/578309693"
 
 [[tools."github:jdx/packslip"]]
-version = "1.2.0"
+version = "1.6.0"
 backend = "github:jdx/packslip"
-specifiers = ["1.2.0"]
+specifiers = ["1.6.0"]
 
 [tools."github:jdx/packslip"."platforms.linux-arm64"]
-checksum = "sha256:b9fac10864f564602c30a2b0cbae1c87de44edbd49f9e452435e20d25e6ee678"
-url = "https://github.com/jdx/packslip/releases/download/v1.2.0/packslip-v1.2.0-linux-arm64.tar.xz"
-url_api = "https://api.github.com/repos/jdx/packslip/releases/assets/552972054"
+checksum = "sha256:2037c3a4c7c4b66f67decb8ea17ae0571894cbe98dd351d69fb5c0020ef96acd"
+url = "https://github.com/jdx/packslip/releases/download/v1.6.0/packslip-v1.6.0-linux-arm64.tar.xz"
+url_api = "https://api.github.com/repos/jdx/packslip/releases/assets/611372030"
 provenance = "github-attestations"
 
 [tools."github:jdx/packslip"."platforms.linux-arm64-musl"]
-checksum = "sha256:b9fac10864f564602c30a2b0cbae1c87de44edbd49f9e452435e20d25e6ee678"
-url = "https://github.com/jdx/packslip/releases/download/v1.2.0/packslip-v1.2.0-linux-arm64.tar.xz"
-url_api = "https://api.github.com/repos/jdx/packslip/releases/assets/552972054"
+checksum = "sha256:2037c3a4c7c4b66f67decb8ea17ae0571894cbe98dd351d69fb5c0020ef96acd"
+url = "https://github.com/jdx/packslip/releases/download/v1.6.0/packslip-v1.6.0-linux-arm64.tar.xz"
+url_api = "https://api.github.com/repos/jdx/packslip/releases/assets/611372030"
 provenance = "github-attestations"
 
 [tools."github:jdx/packslip"."platforms.linux-x64"]
-checksum = "sha256:7564aaabb34121d6eae65191711fa52a9c88e763e60b0a0e3585833b7a0830b1"
-url = "https://github.com/jdx/packslip/releases/download/v1.2.0/packslip-v1.2.0-linux-x64.tar.xz"
-url_api = "https://api.github.com/repos/jdx/packslip/releases/assets/552972051"
+checksum = "sha256:b57bc18667039138fd23ada4a6b650a6e1d8c4b8c3a6e3695dafc010f8e25537"
+url = "https://github.com/jdx/packslip/releases/download/v1.6.0/packslip-v1.6.0-linux-x64.tar.xz"
+url_api = "https://api.github.com/repos/jdx/packslip/releases/assets/611372061"
 provenance = "github-attestations"
 
 [tools."github:jdx/packslip"."platforms.linux-x64-musl"]
-checksum = "sha256:7564aaabb34121d6eae65191711fa52a9c88e763e60b0a0e3585833b7a0830b1"
-url = "https://github.com/jdx/packslip/releases/download/v1.2.0/packslip-v1.2.0-linux-x64.tar.xz"
-url_api = "https://api.github.com/repos/jdx/packslip/releases/assets/552972051"
+checksum = "sha256:b57bc18667039138fd23ada4a6b650a6e1d8c4b8c3a6e3695dafc010f8e25537"
+url = "https://github.com/jdx/packslip/releases/download/v1.6.0/packslip-v1.6.0-linux-x64.tar.xz"
+url_api = "https://api.github.com/repos/jdx/packslip/releases/assets/611372061"
 provenance = "github-attestations"
 
 [tools."github:jdx/packslip"."platforms.macos-arm64"]
-checksum = "sha256:1dbe331f79039c64c6b0726fa4db188a4c8bb79627bdd979723bfd2be0e111d0"
-url = "https://github.com/jdx/packslip/releases/download/v1.2.0/packslip-v1.2.0-darwin-arm64.tar.xz"
-url_api = "https://api.github.com/repos/jdx/packslip/releases/assets/552972055"
+checksum = "sha256:b6175f62648584127bb59c136f482de65d96644fd3e9274930c347d81538e39a"
+url = "https://github.com/jdx/packslip/releases/download/v1.6.0/packslip-v1.6.0-darwin-arm64.tar.xz"
+url_api = "https://api.github.com/repos/jdx/packslip/releases/assets/611371985"
 provenance = "github-attestations"
 
 [tools."github:jdx/packslip"."platforms.macos-x64"]
-checksum = "sha256:2644daeaa800f63b2c11426bc9bc0214cfc751f8144f7872dc45c2c538fe7414"
-url = "https://github.com/jdx/packslip/releases/download/v1.2.0/packslip.1"
-url_api = "https://api.github.com/repos/jdx/packslip/releases/assets/552972066"
+checksum = "sha256:fc9f7664a8703f6895775bf25b316444dd24ad3e87b31549a5e1c423e2560a82"
+url = "https://github.com/jdx/packslip/releases/download/v1.6.0/packslip.1"
+url_api = "https://api.github.com/repos/jdx/packslip/releases/assets/611372183"
 provenance = "github-attestations"
 
 [tools."github:jdx/packslip"."platforms.windows-x64"]
-checksum = "sha256:3078cb66c261e3ea7e70df22362a25b70249e1f93fba3b65de97a8067b5c727e"
-url = "https://github.com/jdx/packslip/releases/download/v1.2.0/packslip-v1.2.0-windows-x64.zip"
-url_api = "https://api.github.com/repos/jdx/packslip/releases/assets/552972053"
+checksum = "sha256:30fb9998b6c2de65ec54593a8be0923501ace1fc8db468f143919bb3b79fd9df"
+url = "https://github.com/jdx/packslip/releases/download/v1.6.0/packslip-v1.6.0-windows-x64.zip"
+url_api = "https://api.github.com/repos/jdx/packslip/releases/assets/611372165"
 provenance = "github-attestations"
 
 [[tools.jq]]
@@ -335,44 +335,44 @@ url = "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15
 url_api = "https://api.github.com/repos/BurntSushi/ripgrep/releases/assets/478119643"
 
 [[tools.rtk]]
-version = "0.49.0"
+version = "0.51.0"
 backend = "aqua:rtk-ai/rtk"
-specifiers = ["0.49.0"]
+specifiers = ["0.51.0"]
 
 [tools.rtk."platforms.linux-arm64"]
-checksum = "sha256:c8ea4b6560841e73157c134fd4a3293914c6ede42e786ee985cf491fde691ba7"
-url = "https://github.com/rtk-ai/rtk/releases/download/v0.49.0/rtk-aarch64-unknown-linux-gnu.tar.gz"
-url_api = "https://api.github.com/repos/rtk-ai/rtk/releases/assets/556881345"
+checksum = "sha256:8d6d1aad9e69b42481eda7039507d1f7ee93698f87713cecd873d287c1931632"
+url = "https://github.com/rtk-ai/rtk/releases/download/v0.51.0/rtk-aarch64-unknown-linux-gnu.tar.gz"
+url_api = "https://api.github.com/repos/rtk-ai/rtk/releases/assets/605695144"
 
 [tools.rtk."platforms.linux-x64"]
-checksum = "sha256:7278231dfd7e6a730a4ab7f847b195bcf02289c2d57622b0dab75a6411100c8f"
-url = "https://github.com/rtk-ai/rtk/releases/download/v0.49.0/rtk-x86_64-unknown-linux-musl.tar.gz"
-url_api = "https://api.github.com/repos/rtk-ai/rtk/releases/assets/556881350"
+checksum = "sha256:5028d3b19a8f0990d30fec9fbb07e32782bc5698e618fb1861aad8a9ccba4eb5"
+url = "https://github.com/rtk-ai/rtk/releases/download/v0.51.0/rtk-x86_64-unknown-linux-musl.tar.gz"
+url_api = "https://api.github.com/repos/rtk-ai/rtk/releases/assets/605695141"
 
 [tools.rtk."platforms.linux-x64-musl"]
-checksum = "sha256:7278231dfd7e6a730a4ab7f847b195bcf02289c2d57622b0dab75a6411100c8f"
-url = "https://github.com/rtk-ai/rtk/releases/download/v0.49.0/rtk-x86_64-unknown-linux-musl.tar.gz"
-url_api = "https://api.github.com/repos/rtk-ai/rtk/releases/assets/556881350"
+checksum = "sha256:5028d3b19a8f0990d30fec9fbb07e32782bc5698e618fb1861aad8a9ccba4eb5"
+url = "https://github.com/rtk-ai/rtk/releases/download/v0.51.0/rtk-x86_64-unknown-linux-musl.tar.gz"
+url_api = "https://api.github.com/repos/rtk-ai/rtk/releases/assets/605695141"
 
 [tools.rtk."platforms.macos-arm64"]
-checksum = "sha256:bbbfebabb22686993a80da731aa4d5d35116fb8ae24abb00608efa028e13ae01"
-url = "https://github.com/rtk-ai/rtk/releases/download/v0.49.0/rtk-aarch64-apple-darwin.tar.gz"
-url_api = "https://api.github.com/repos/rtk-ai/rtk/releases/assets/556881349"
+checksum = "sha256:8817d8b71afc02ac8bf06eb24bcc41c306592ab735b68e8fee9db1ba0de7cb59"
+url = "https://github.com/rtk-ai/rtk/releases/download/v0.51.0/rtk-aarch64-apple-darwin.tar.gz"
+url_api = "https://api.github.com/repos/rtk-ai/rtk/releases/assets/605695140"
 
 [tools.rtk."platforms.macos-x64"]
-checksum = "sha256:d297388f4a8a786e79abe5f55b80451725bfe8c5835b4736c05d7cff4d68f627"
-url = "https://github.com/rtk-ai/rtk/releases/download/v0.49.0/rtk-x86_64-apple-darwin.tar.gz"
-url_api = "https://api.github.com/repos/rtk-ai/rtk/releases/assets/556881348"
+checksum = "sha256:bd39c8153f4147358360c7dc51665a8131cc9ee16f81f69a9402ffa500be3cc2"
+url = "https://github.com/rtk-ai/rtk/releases/download/v0.51.0/rtk-x86_64-apple-darwin.tar.gz"
+url_api = "https://api.github.com/repos/rtk-ai/rtk/releases/assets/605695138"
 
 [tools.rtk."platforms.windows-x64"]
-checksum = "sha256:cb971046598f0e8bd51f6c27780fcdd2c39a4c459a811bd95b0d77ba8c0d7c9f"
-url = "https://github.com/rtk-ai/rtk/releases/download/v0.49.0/rtk-x86_64-pc-windows-msvc.zip"
-url_api = "https://api.github.com/repos/rtk-ai/rtk/releases/assets/556881347"
+checksum = "sha256:1623e9b45d28b15122d69e7314776e1123a804224885ce07e7182fb40080f05c"
+url = "https://github.com/rtk-ai/rtk/releases/download/v0.51.0/rtk-x86_64-pc-windows-msvc.zip"
+url_api = "https://api.github.com/repos/rtk-ai/rtk/releases/assets/605695127"
 
 [[tools.rust]]
-version = "1.98.1"
+version = "1.99.0"
 backend = "core:rust"
-specifiers = ["1.98.1"]
+specifiers = ["1.99.0"]
 
 [tools.rust.options]
 components = "rust-analyzer,rust-src"
@@ -458,48 +458,48 @@ url = "https://github.com/mvdan/sh/releases/download/v3.14.1/shfmt_v3.14.1_windo
 url_api = "https://api.github.com/repos/mvdan/sh/releases/assets/547320827"
 
 [[tools.yq]]
-version = "4.53.6"
+version = "4.54.1"
 backend = "aqua:mikefarah/yq"
-specifiers = ["4.53.6"]
+specifiers = ["4.54.1"]
 
 [tools.yq."platforms.linux-arm64"]
-checksum = "sha256:88a1016bc1d657375a35864e4f44b6f333df8ff97b559f51bba0adcb2169df09"
-url = "https://github.com/mikefarah/yq/releases/download/v4.53.6/yq_linux_arm64"
-url_api = "https://api.github.com/repos/mikefarah/yq/releases/assets/522028007"
+checksum = "sha256:189088da0c6429ec5178dfaab1a114805f6cab0b61b165ab236efedf1d57a71b"
+url = "https://github.com/mikefarah/yq/releases/download/v4.54.1/yq_linux_arm64"
+url_api = "https://api.github.com/repos/mikefarah/yq/releases/assets/597222603"
 provenance = "cosign"
 
 [tools.yq."platforms.linux-arm64-musl"]
-checksum = "sha256:88a1016bc1d657375a35864e4f44b6f333df8ff97b559f51bba0adcb2169df09"
-url = "https://github.com/mikefarah/yq/releases/download/v4.53.6/yq_linux_arm64"
-url_api = "https://api.github.com/repos/mikefarah/yq/releases/assets/522028007"
+checksum = "sha256:189088da0c6429ec5178dfaab1a114805f6cab0b61b165ab236efedf1d57a71b"
+url = "https://github.com/mikefarah/yq/releases/download/v4.54.1/yq_linux_arm64"
+url_api = "https://api.github.com/repos/mikefarah/yq/releases/assets/597222603"
 provenance = "cosign"
 
 [tools.yq."platforms.linux-x64"]
-checksum = "sha256:c5f056448f973ae7d39b5401949648a78f2dc1947d6a8eb65be60d5c504b9385"
-url = "https://github.com/mikefarah/yq/releases/download/v4.53.6/yq_linux_amd64"
-url_api = "https://api.github.com/repos/mikefarah/yq/releases/assets/522028022"
+checksum = "sha256:8e34fc298390875de416e6a4afcb8cabeceb25d9aa8506c1a2f9353cf702ea5f"
+url = "https://github.com/mikefarah/yq/releases/download/v4.54.1/yq_linux_amd64"
+url_api = "https://api.github.com/repos/mikefarah/yq/releases/assets/597222595"
 provenance = "cosign"
 
 [tools.yq."platforms.linux-x64-musl"]
-checksum = "sha256:c5f056448f973ae7d39b5401949648a78f2dc1947d6a8eb65be60d5c504b9385"
-url = "https://github.com/mikefarah/yq/releases/download/v4.53.6/yq_linux_amd64"
-url_api = "https://api.github.com/repos/mikefarah/yq/releases/assets/522028022"
+checksum = "sha256:8e34fc298390875de416e6a4afcb8cabeceb25d9aa8506c1a2f9353cf702ea5f"
+url = "https://github.com/mikefarah/yq/releases/download/v4.54.1/yq_linux_amd64"
+url_api = "https://api.github.com/repos/mikefarah/yq/releases/assets/597222595"
 provenance = "cosign"
 
 [tools.yq."platforms.macos-arm64"]
-checksum = "sha256:cceb0b8d71ea5294334121f8429f33f92b920e7217d904a2f9f35443968ac424"
-url = "https://github.com/mikefarah/yq/releases/download/v4.53.6/yq_darwin_arm64"
-url_api = "https://api.github.com/repos/mikefarah/yq/releases/assets/522028033"
+checksum = "sha256:fee511a181bd8b3e6b7da98842b41973bfac8cd3bcd341ed29a584620b5b2844"
+url = "https://github.com/mikefarah/yq/releases/download/v4.54.1/yq_darwin_arm64"
+url_api = "https://api.github.com/repos/mikefarah/yq/releases/assets/597222609"
 provenance = "cosign"
 
 [tools.yq."platforms.macos-x64"]
-checksum = "sha256:caa513cb04f3804b34d4752f0e0d7904fecb9e7cf1d34081289f83259319a7f6"
-url = "https://github.com/mikefarah/yq/releases/download/v4.53.6/yq_darwin_amd64"
-url_api = "https://api.github.com/repos/mikefarah/yq/releases/assets/522028031"
+checksum = "sha256:3a812fce205a4d67014fb71b7fa297092210e580df3d8f52dddc2cf3a599c22b"
+url = "https://github.com/mikefarah/yq/releases/download/v4.54.1/yq_darwin_amd64"
+url_api = "https://api.github.com/repos/mikefarah/yq/releases/assets/597222619"
 provenance = "cosign"
 
 [tools.yq."platforms.windows-x64"]
-checksum = "sha256:ece3dd8bb50d39f93610506273ea262feb91e5c486bbddbb10abf91b2a6c0f14"
-url = "https://github.com/mikefarah/yq/releases/download/v4.53.6/yq_windows_amd64.exe"
-url_api = "https://api.github.com/repos/mikefarah/yq/releases/assets/522027974"
+checksum = "sha256:b645f47ebb3a0d2fbab52998550bbd0a1706f23b5ca5f5b48e638c580bb70928"
+url = "https://github.com/mikefarah/yq/releases/download/v4.54.1/yq_windows_amd64.exe"
+url_api = "https://api.github.com/repos/mikefarah/yq/releases/assets/597222575"
 provenance = "cosign"

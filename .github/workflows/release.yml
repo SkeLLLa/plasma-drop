@@ -232,16 +232,6 @@ jobs:
             target/release-assets/plasma-drop-${{ steps.release-plz.outputs.version }}-1.x86_64.rpm.sha256
             target/release-assets/SHA256SUMS
 
-      - name: Publish packslip manifest
-        if: ${{ steps.release-plz.outputs.released == 'true' }}
-        uses: jdx/packslip@v1
-        with:
-          artifacts: target/release-assets/plasma-drop-${{ steps.release-plz.outputs.version }}-${{ env.RUST_TARGET }}.tar.gz
-          bin: plasma-drop
-          tag: ${{ steps.release-plz.outputs.tag_name }}
-          version: ${{ steps.release-plz.outputs.version }}
-          attest: link
-
       - name: Upload package repository inputs
         if: ${{ steps.release-plz.outputs.released == 'true' }}
         uses: actions/upload-artifact@v7
@@ -251,6 +241,103 @@ jobs:
           path: |
             target/release-assets/plasma-drop_${{ steps.release-plz.outputs.version }}_amd64.deb
             target/release-assets/plasma-drop-${{ steps.release-plz.outputs.version }}-1.x86_64.rpm
+
+  packslip:
+    name: Sign packslip manifest
+    needs: release
+    if: ${{ needs.release.outputs.released == 'true' }}
+    runs-on: ubuntu-latest
+    # Signing never holds release-write access; publish-packslip uploads the bundle.
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      # The tag sits on the release-plz version-bump commit, not on github.sha (the push
+      # that triggered this run), so record the commit the tag actually names.
+      - name: Resolve tagged commit
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ needs.release.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          echo "commit=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${TAG_NAME}" --jq .sha)" >> "${GITHUB_OUTPUT}"
+
+      # Signs the tarball already attached to the release, so the manifest covers exactly
+      # what users download. The release job attested it, hence attest: link.
+      - name: Sign packslip manifest
+        id: packslip
+        uses: jdx/packslip@v1
+        with:
+          download: plasma-drop-*-${{ env.RUST_TARGET }}.tar.gz
+          bin: plasma-drop
+          tag: ${{ needs.release.outputs.tag_name }}
+          version: ${{ needs.release.outputs.version }}
+          commit: ${{ steps.source.outputs.commit }}
+          attest: link
+          upload: false
+
+      - name: Keep signed bundle
+        uses: actions/upload-artifact@v7
+        with:
+          name: packslip-bundle
+          retention-days: 1
+          path: ${{ steps.packslip.outputs.bundle }}
+          if-no-files-found: error
+
+  publish-packslip:
+    name: Publish packslip manifest
+    needs: [release, packslip]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Fetch signed bundle
+        uses: actions/download-artifact@v8
+        with:
+          name: packslip-bundle
+          path: packslip
+
+      - name: Upload signed bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ needs.release.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          test -f packslip/packslip.sigstore.json
+          gh release upload "${TAG_NAME}" packslip/packslip.sigstore.json --repo "${GITHUB_REPOSITORY}" --clobber
+
+  verify-packslip:
+    name: Verify published packslip manifest
+    needs: [release, publish-packslip]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      # Signer fingerprint published in README.md; constant across releases.
+      PACKSLIP_PIN: ps1_4yd5vxao3lfzaox72lynxuotke
+    steps:
+      - name: Install packslip
+        uses: taiki-e/install-action@v2
+        with:
+          tool: packslip@1.6.0
+
+      # Check what users download: the public release URLs, not this run's local files.
+      - name: Verify manifest against published tarball
+        env:
+          TAG_NAME: ${{ needs.release.outputs.tag_name }}
+          VERSION: ${{ needs.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG_NAME}"
+          asset="plasma-drop-${VERSION}-${RUST_TARGET}.tar.gz"
+          curl -fsSLO --retry 3 "${base}/${asset}"
+          curl -fsSLO --retry 3 "${base}/packslip.sigstore.json"
+          packslip verify packslip.sigstore.json \
+            --identity-prefix "https://github.com/${GITHUB_REPOSITORY}/" \
+            --issuer https://token.actions.githubusercontent.com \
+            --pin "${PACKSLIP_PIN}" \
+            --artifact "${asset}"
 
   package-repositories:
     name: Publish package repositories

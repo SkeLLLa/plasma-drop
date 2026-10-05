@@ -89,7 +89,12 @@ The release flow should:
 10. It generates a combined `SHA256SUMS` file and one `.sha256` sidecar per artifact.
 11. It attaches the `tar.gz`, `deb`, `rpm`, `SHA256SUMS`, and per-artifact `.sha256` files to
     the GitHub release.
-12. It builds and deploys RPM/APT repository metadata to GitHub Pages.
+12. Once the tarball is attached, `jdx/packslip` signs a `packslip.sigstore.json` manifest
+    covering it (used by `packslip install` and the `mise` packslip backend), recording the
+    commit the tag points to. The signing job has read-only access; a separate job uploads the
+    bundle, and a third verifies it against the published tarball and the signer fingerprint in
+    `README.md`.
+13. It builds and deploys RPM/APT repository metadata to GitHub Pages.
 
 The release workflow uses the default `GITHUB_TOKEN` for repository operations. It does not depend
 on a PAT to trigger a second workflow.
