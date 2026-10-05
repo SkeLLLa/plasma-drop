@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.11.1](https://github.com/SkeLLLa/plasma-drop/compare/v1.11.0...v1.11.1) - 2026-10-05
+
+### Fixed
+
+- proper packslip release & rust 1.99
+
 ## [1.11.0](https://github.com/SkeLLLa/plasma-drop/compare/v1.10.0...v1.11.0) - 2026-10-05
 
 ### Added
