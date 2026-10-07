@@ -24,6 +24,8 @@ jobs:
   rust-quality:
     name: Rust quality (stable)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v7
       - name: Install stable Rust with clippy and rustfmt
