@@ -103,17 +103,20 @@ jobs:
           echo "tag_name=${TAG_NAME}" >> "${GITHUB_OUTPUT}"
           echo "releases=${RELEASES}" >> "${GITHUB_OUTPUT}"
 
-      - name: Install packaging tools
-        if: ${{ steps.release-plz.outputs.released == 'true' }}
-        run: cargo install --locked cargo-deb cargo-generate-rpm
+      # Independent: tool compiles use cargo install's own temp target dir, so they don't
+      # contend with the release build for the target/ lock.
+      - parallel:
+          - name: Install packaging tools
+            if: ${{ steps.release-plz.outputs.released == 'true' }}
+            run: cargo install --locked cargo-deb cargo-generate-rpm
 
-      - name: Install package verification tools
-        if: ${{ steps.release-plz.outputs.released == 'true' }}
-        run: sudo apt-get update && sudo apt-get install -y rpm
+          - name: Install package verification tools
+            if: ${{ steps.release-plz.outputs.released == 'true' }}
+            run: sudo apt-get update && sudo apt-get install -y rpm
 
-      - name: Build release binary
-        if: ${{ steps.release-plz.outputs.released == 'true' }}
-        run: cargo build --release --locked --target "${RUST_TARGET}"
+          - name: Build release binary
+            if: ${{ steps.release-plz.outputs.released == 'true' }}
+            run: cargo build --release --locked --target "${RUST_TARGET}"
 
       - name: Assemble binary distribution
         if: ${{ steps.release-plz.outputs.released == 'true' }}
