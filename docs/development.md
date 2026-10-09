@@ -66,6 +66,13 @@ Copilot review configuration lives in `.github/copilot-instructions.md` and
 See `docs/copilot-review.md` for the review request flow, automatic review settings, and
 maintenance notes.
 
+## Sibling Project
+
+[quartz-drop](https://github.com/SkeLLLa/quartz-drop) is the macOS (Swift) port of `plasma-drop`
+and is usually checked out next to this repo as `../quartz-drop`. It parses the same config
+format, so config changes here (new fields, defaults, validation rules) should be mirrored there,
+and its `docs/configuration.md` "Differences from plasma-drop" section kept up to date.
+
 ## Notes
 
 - The current crate is a binary target, so crate docs are used as the main human-facing documentation surface for `cargo doc`.

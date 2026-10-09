@@ -2,6 +2,11 @@
 
 The config file is TOML and contains one or more `[[app]]` entries.
 
+The same file also works with [quartz-drop](https://github.com/SkeLLLa/quartz-drop), the macOS
+sibling project. See its
+[differences from plasma-drop](https://github.com/SkeLLLa/quartz-drop/blob/master/docs/configuration.md#differences-from-plasma-drop)
+for options that behave differently or are ignored there.
+
 ## Top-Level Fields
 
 - `log_level`: optional log level. One of `error`, `warn`, `info`, `debug`, `trace`, `off`. Defaults to `error`.

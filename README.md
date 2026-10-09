@@ -8,6 +8,7 @@
 [![Release](https://github.com/SkeLLLa/plasma-drop/actions/workflows/release.yml/badge.svg)](https://github.com/SkeLLLa/plasma-drop/actions/workflows/release.yml)
 [![Crates.io](https://img.shields.io/crates/v/plasma-drop.svg)](https://crates.io/crates/plasma-drop)
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](COPYING)
+[![macOS: quartz-drop](https://img.shields.io/badge/macOS-quartz--drop-black?logo=apple)](https://github.com/SkeLLLa/quartz-drop)
 
 `plasma-drop` is a KDE Plasma 6 dropdown app launcher. It registers global shortcuts through
 KWin, finds or starts the apps you configure, and moves their windows into dropdown-style screen
@@ -18,6 +19,9 @@ the config.
 
 It is heavily inspired by [windows-terminal-quake](https://github.com/flyingpie/windows-terminal-quake).
 If you need a GUI, a Windows version, or a broader configuration surface, use that app.
+
+On macOS, use the sibling project [quartz-drop](https://github.com/SkeLLLa/quartz-drop). It is a
+Swift port of `plasma-drop` and reads the same config file.
 
 ## Demo
 

@@ -28,3 +28,6 @@
 `plasma-drop` is heavily inspired by
 [windows-terminal-quake](https://github.com/flyingpie/windows-terminal-quake). Use that app if
 you need a GUI, a Windows version, or more configuration options.
+
+[quartz-drop](https://github.com/SkeLLLa/quartz-drop) is the macOS sibling of `plasma-drop`. It is
+a Swift port that loads `plasma-drop` configs as-is and ignores options that do not apply on macOS.

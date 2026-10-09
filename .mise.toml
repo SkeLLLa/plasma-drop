@@ -17,7 +17,6 @@ shellcheck = "0.11.0"
 shfmt = "3.14.1"
 "github:jdx/packslip" = "1.6.0"
 rtk = { version = "0.51.0", postinstall = "rtk init -g --claude && rtk init -g --codex" }
-"npm:context-mode" = "1.0.169"
 rust = { version = "1.99.0", components = "rust-analyzer,rust-src", mr_boxington = true }
 mr-boxington = "1.16.0"
 cargo-binstall = "1.25.1"
