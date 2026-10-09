@@ -35,6 +35,8 @@ filename = "/usr/bin/kate"
 attach_mode = "find-or-start"
 # Keep the default behavior explicit for the slide/fade example below.
 hide_behavior = "offscreen"
+# Focus the window instead of hiding it when it is visible but not focused (default: false).
+# focus_before_hide = true
 
 [app.placement]
 width = "50%"
