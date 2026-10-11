@@ -52,6 +52,14 @@ pub enum AnimationEasing {
     EaseInOut,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnimationDirection {
+    Top,
+    Bottom,
+    Left,
+    Right,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlacementConfig {
     pub width: PlacementMetric,
@@ -66,6 +74,7 @@ pub struct PlacementConfig {
 pub struct AnimationConfig {
     pub style: AnimationStyle,
     pub easing: AnimationEasing,
+    pub direction: AnimationDirection,
     pub duration_ms: u16,
     pub frame_delay_ms: u16,
 }
@@ -134,6 +143,7 @@ struct RawPlacementConfig {
 struct RawAnimationConfig {
     style: Option<String>,
     easing: Option<String>,
+    direction: Option<String>,
     duration_ms: Option<u16>,
     frame_delay_ms: Option<u16>,
 }
@@ -360,6 +370,8 @@ impl AnimationConfig {
 
         let style = AnimationStyle::parse(app_name, raw.style.as_deref().unwrap_or("none"))?;
         let easing = AnimationEasing::parse(app_name, raw.easing.as_deref().unwrap_or("ease-out"))?;
+        let direction =
+            AnimationDirection::parse(app_name, raw.direction.as_deref().unwrap_or("top"))?;
         let duration_ms = raw.duration_ms.unwrap_or(150);
         let frame_delay_ms = raw.frame_delay_ms.unwrap_or(16);
 
@@ -373,6 +385,7 @@ impl AnimationConfig {
         Ok(Self {
             style,
             easing,
+            direction,
             duration_ms,
             frame_delay_ms,
         })
@@ -397,6 +410,7 @@ impl Default for AnimationConfig {
         Self {
             style: AnimationStyle::None,
             easing: AnimationEasing::EaseOut,
+            direction: AnimationDirection::Top,
             duration_ms: 150,
             frame_delay_ms: 16,
         }
@@ -449,6 +463,18 @@ impl AnimationEasing {
             "ease-out" => Ok(Self::EaseOut),
             "ease-in-out" => Ok(Self::EaseInOut),
             other => bail!("app '{app_name}' has invalid animation.easing '{other}'"),
+        }
+    }
+}
+
+impl AnimationDirection {
+    fn parse(app_name: &str, raw: &str) -> Result<Self> {
+        match raw {
+            "top" => Ok(Self::Top),
+            "bottom" => Ok(Self::Bottom),
+            "left" => Ok(Self::Left),
+            "right" => Ok(Self::Right),
+            other => bail!("app '{app_name}' has invalid animation.direction '{other}'"),
         }
     }
 }
@@ -519,8 +545,8 @@ fn parse_screen_name(app_name: &str, raw: Option<&str>) -> Result<Option<String>
 #[cfg(test)]
 mod tests {
     use super::{
-        AnimationConfig, AnimationEasing, AnimationStyle, Config, HideBehavior, PlacementConfig,
-        PlacementMetric, PlacementPosition, RawAppConfig, RawConfig,
+        AnimationConfig, AnimationDirection, AnimationEasing, AnimationStyle, Config, HideBehavior,
+        PlacementConfig, PlacementMetric, PlacementPosition, RawAppConfig, RawConfig,
     };
     use std::path::PathBuf;
 
@@ -847,6 +873,7 @@ mod tests {
         raw.animation = Some(super::RawAnimationConfig {
             style: Some("slide-fade".into()),
             easing: Some("ease-in-out".into()),
+            direction: Some("left".into()),
             duration_ms: Some(220),
             frame_delay_ms: Some(8),
         });
@@ -854,8 +881,52 @@ mod tests {
         let config = Config::from_raw(make_raw(vec![raw])).unwrap();
         assert_eq!(config.apps[0].animation.style, AnimationStyle::SlideFade);
         assert_eq!(config.apps[0].animation.easing, AnimationEasing::EaseInOut);
+        assert_eq!(config.apps[0].animation.direction, AnimationDirection::Left);
         assert_eq!(config.apps[0].animation.duration_ms, 220);
         assert_eq!(config.apps[0].animation.frame_delay_ms, 8);
+    }
+
+    #[test]
+    fn animation_direction_defaults_to_top() {
+        let config = Config::from_raw(make_raw(vec![app("terminal", "ctrl+grave")])).unwrap();
+        assert_eq!(config.apps[0].animation.direction, AnimationDirection::Top);
+    }
+
+    #[test]
+    fn accepts_all_animation_directions() {
+        for (raw_direction, expected) in [
+            ("top", AnimationDirection::Top),
+            ("bottom", AnimationDirection::Bottom),
+            ("left", AnimationDirection::Left),
+            ("right", AnimationDirection::Right),
+        ] {
+            let mut raw = app("terminal", "ctrl+grave");
+            raw.animation = Some(super::RawAnimationConfig {
+                style: Some("slide".into()),
+                easing: None,
+                direction: Some(raw_direction.into()),
+                duration_ms: None,
+                frame_delay_ms: None,
+            });
+
+            let config = Config::from_raw(make_raw(vec![raw])).unwrap();
+            assert_eq!(config.apps[0].animation.direction, expected);
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_animation_direction() {
+        let mut raw = app("terminal", "ctrl+grave");
+        raw.animation = Some(super::RawAnimationConfig {
+            style: Some("slide".into()),
+            easing: None,
+            direction: Some("diagonal".into()),
+            duration_ms: None,
+            frame_delay_ms: None,
+        });
+
+        let err = Config::from_raw(make_raw(vec![raw])).unwrap_err();
+        assert!(err.to_string().contains("invalid animation.direction"));
     }
 
     #[test]
@@ -864,6 +935,7 @@ mod tests {
         raw.animation = Some(super::RawAnimationConfig {
             style: Some("bounce".into()),
             easing: None,
+            direction: None,
             duration_ms: None,
             frame_delay_ms: None,
         });
@@ -878,6 +950,7 @@ mod tests {
         raw.animation = Some(super::RawAnimationConfig {
             style: Some("slide".into()),
             easing: None,
+            direction: None,
             duration_ms: Some(2_001),
             frame_delay_ms: None,
         });
@@ -895,6 +968,7 @@ mod tests {
         raw.animation = Some(super::RawAnimationConfig {
             style: Some("slide".into()),
             easing: None,
+            direction: None,
             duration_ms: None,
             frame_delay_ms: Some(0),
         });

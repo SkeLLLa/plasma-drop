@@ -193,7 +193,7 @@ fn ease(progress: f64, easing: AnimationEasing) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::{TransitionPhase, TransitionPlan};
-    use crate::config::{AnimationConfig, AnimationEasing, AnimationStyle};
+    use crate::config::{AnimationConfig, AnimationDirection, AnimationEasing, AnimationStyle};
     use crate::wm::FrameGeometry;
 
     const fn visible() -> FrameGeometry {
@@ -220,6 +220,7 @@ mod tests {
             &AnimationConfig {
                 style: AnimationStyle::Slide,
                 easing: AnimationEasing::EaseOut,
+                direction: AnimationDirection::Top,
                 duration_ms: 160,
                 frame_delay_ms: 8,
             },
@@ -241,6 +242,7 @@ mod tests {
             &AnimationConfig {
                 style: AnimationStyle::Fade,
                 easing: AnimationEasing::EaseInOut,
+                direction: AnimationDirection::Top,
                 duration_ms: 160,
                 frame_delay_ms: 16,
             },
@@ -262,6 +264,7 @@ mod tests {
             &AnimationConfig {
                 style: AnimationStyle::None,
                 easing: AnimationEasing::Linear,
+                direction: AnimationDirection::Top,
                 duration_ms: 1000,
                 frame_delay_ms: 16,
             },

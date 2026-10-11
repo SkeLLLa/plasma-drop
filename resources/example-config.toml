@@ -24,6 +24,7 @@ position = "left"
 [app.animation]
 style = "slide"
 easing = "ease-out"
+direction = "top"
 duration_ms = 1000
 # Set lower for higher refresh rate screens, e.g. 8 for 120 Hz.
 frame_delay_ms = 8

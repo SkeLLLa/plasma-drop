@@ -196,7 +196,8 @@ impl ToggleService {
             .with_context(|| format!("invalid placement for '{app_name}'"))?;
         let visible_rect = screen.placement_rect(&config.placement);
         let screens = self.current_screens().await;
-        let hidden_rect = hidden_rect_for_screens(&screens, &visible_rect);
+        let hidden_rect =
+            hidden_rect_for_screens(&screens, &visible_rect, config.animation.direction);
         if let Some(plan) = TransitionPlan::from_config(
             &config.animation,
             &visible_rect,
@@ -244,7 +245,8 @@ impl ToggleService {
                 let screens = self.current_screens().await;
                 let screen = Self::screen_for_window(&screens, &window);
                 let visible_rect = screen.placement_rect(&config.placement);
-                let hidden_rect = hidden_rect_for_screens(&screens, &visible_rect);
+                let hidden_rect =
+                    hidden_rect_for_screens(&screens, &visible_rect, config.animation.direction);
                 if let Some(plan) = TransitionPlan::from_config(
                     &config.animation,
                     &visible_rect,

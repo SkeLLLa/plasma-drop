@@ -1,4 +1,4 @@
-use crate::config::{PlacementConfig, PlacementMetric, PlacementPosition};
+use crate::config::{AnimationDirection, PlacementConfig, PlacementMetric, PlacementPosition};
 use crate::wm::FrameGeometry;
 use anyhow::{Context, Result, bail};
 use regex::Regex;
@@ -152,16 +152,42 @@ impl ScreenInfo {
     }
 }
 
-pub fn hidden_rect_for_screens(screens: &[ScreenInfo], visible: &FrameGeometry) -> FrameGeometry {
-    let top = screens
+pub fn hidden_rect_for_screens(
+    screens: &[ScreenInfo],
+    visible: &FrameGeometry,
+    direction: AnimationDirection,
+) -> FrameGeometry {
+    let min_x = screens
+        .iter()
+        .map(|screen| screen.x)
+        .min()
+        .unwrap_or(visible.x);
+    let min_y = screens
         .iter()
         .map(|screen| screen.y)
         .min()
         .unwrap_or(visible.y);
+    let max_right = screens
+        .iter()
+        .map(|screen| screen.x + screen.width)
+        .max()
+        .unwrap_or(visible.x + visible.width);
+    let max_bottom = screens
+        .iter()
+        .map(|screen| screen.y + screen.height)
+        .max()
+        .unwrap_or(visible.y + visible.height);
+
+    let (x, y) = match direction {
+        AnimationDirection::Top => (visible.x, min_y - visible.height),
+        AnimationDirection::Bottom => (visible.x, max_bottom),
+        AnimationDirection::Left => (min_x - visible.width, visible.y),
+        AnimationDirection::Right => (max_right, visible.y),
+    };
 
     FrameGeometry {
-        x: visible.x,
-        y: top - visible.height,
+        x,
+        y,
         width: visible.width,
         height: visible.height,
     }
@@ -203,7 +229,7 @@ pub fn parse_support_information(text: &str) -> Result<Vec<ScreenInfo>> {
 #[cfg(test)]
 mod tests {
     use super::{ScreenInfo, hidden_rect_for_screens, parse_support_information};
-    use crate::config::{PlacementConfig, PlacementMetric, PlacementPosition};
+    use crate::config::{AnimationDirection, PlacementConfig, PlacementMetric, PlacementPosition};
     use crate::wm::FrameGeometry;
 
     #[test]
@@ -524,10 +550,75 @@ Geometry: -1920,-1080,1920x1080
             height: 720,
         };
 
-        let hidden = hidden_rect_for_screens(&screens, &visible);
+        let hidden = hidden_rect_for_screens(&screens, &visible, AnimationDirection::Top);
         assert_eq!(
             (hidden.x, hidden.y, hidden.width, hidden.height),
             (640, -1800, 1280, 720)
+        );
+    }
+
+    #[test]
+    fn computes_hidden_rect_for_all_directions() {
+        let screens = vec![
+            ScreenInfo {
+                index: 0,
+                name: "left".into(),
+                x: -1920,
+                y: 0,
+                width: 1920,
+                height: 1080,
+            },
+            screen(),
+        ];
+        let visible = FrameGeometry {
+            x: 100,
+            y: 200,
+            width: 960,
+            height: 540,
+        };
+
+        let hidden_top = hidden_rect_for_screens(&screens, &visible, AnimationDirection::Top);
+        assert_eq!(
+            (
+                hidden_top.x,
+                hidden_top.y,
+                hidden_top.width,
+                hidden_top.height
+            ),
+            (100, -540, 960, 540)
+        );
+
+        let hidden_bottom = hidden_rect_for_screens(&screens, &visible, AnimationDirection::Bottom);
+        assert_eq!(
+            (
+                hidden_bottom.x,
+                hidden_bottom.y,
+                hidden_bottom.width,
+                hidden_bottom.height
+            ),
+            (100, 1080, 960, 540)
+        );
+
+        let hidden_left = hidden_rect_for_screens(&screens, &visible, AnimationDirection::Left);
+        assert_eq!(
+            (
+                hidden_left.x,
+                hidden_left.y,
+                hidden_left.width,
+                hidden_left.height
+            ),
+            (-2880, 200, 960, 540)
+        );
+
+        let hidden_right = hidden_rect_for_screens(&screens, &visible, AnimationDirection::Right);
+        assert_eq!(
+            (
+                hidden_right.x,
+                hidden_right.y,
+                hidden_right.width,
+                hidden_right.height
+            ),
+            (1920, 200, 960, 540)
         );
     }
 }
