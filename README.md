@@ -157,6 +157,17 @@ height = "100%"
 position = "left"
 ```
 
+Animation example:
+
+```toml
+[app.animation]
+style = "slide"
+direction = "left"  # top | bottom | left | right, slide entry/exit edge for slide and slide-fade
+duration_ms = 180
+```
+
+Omit `direction` to use the default (`top`). It is ignored by `fade` and `none`.
+
 Common fields:
 
 | Field                | Purpose                                                            |
@@ -170,7 +181,7 @@ Common fields:
 | `hide_behavior`      | `offscreen` (default) or KWin `minimize` when hidden               |
 | `hide_on_focus_lost` | Hide after focus moves to another window                           |
 | `[app.placement]`    | Width, height, position, offsets, and target screen                |
-| `[app.animation]`    | Optional slide/fade behavior                                       |
+| `[app.animation]`    | Optional slide/fade behavior, including slide `direction`          |
 
 Focus-loss hiding is event-driven through `KWin`
 
