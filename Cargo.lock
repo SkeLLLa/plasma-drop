@@ -603,7 +603,7 @@ dependencies = [
 
 [[package]]
 name = "plasma-drop"
-version = "1.11.2"
+version = "1.12.0"
 dependencies = [
  "anyhow",
  "async-trait",

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.12.0](https://github.com/SkeLLLa/plasma-drop/compare/v1.11.2...v1.12.0) - 2026-10-12
+
+### Added
+
+- set slide animation direction
+
+### Other
+
+- show animation direction in README
+
 ## [1.11.2](https://github.com/SkeLLLa/plasma-drop/compare/v1.11.1...v1.11.2) - 2026-10-09
 
 ### Fixed
