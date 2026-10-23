@@ -63,10 +63,18 @@ jobs:
         id: crates-auth
         uses: rust-lang/crates-io-auth-action@v1
 
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@v1.26.0
+
+      # Install via cargo-binstall like release-plz/action does: it picks the gnu build, while
+      # install-action only ships musl builds, which fail parsing the changelog template since
+      # 0.3.172 ("stack limit reached").
       - name: Install release-plz
-        uses: taiki-e/install-action@v2
-        with:
-          tool: release-plz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cargo binstall release-plz@0.4.0 --strategies crate-meta-data --no-confirm
+          release-plz --version
 
       - name: Bump version and changelog
         env:
