@@ -16,6 +16,12 @@ fn screen_name_re() -> &'static Regex {
         .get_or_init(|| Regex::new(r"(?im)^Name: (.+)$").expect("valid screen name regex"))
 }
 
+fn screen_enabled_re() -> &'static Regex {
+    static SCREEN_ENABLED_RE: OnceLock<Regex> = OnceLock::new();
+    SCREEN_ENABLED_RE
+        .get_or_init(|| Regex::new(r"(?im)^Enabled: (\d+)$").expect("valid screen enabled regex"))
+}
+
 fn screen_geometry_re() -> &'static Regex {
     static SCREEN_GEOMETRY_RE: OnceLock<Regex> = OnceLock::new();
     SCREEN_GEOMETRY_RE.get_or_init(|| {
@@ -195,9 +201,18 @@ pub fn hidden_rect_for_screens(
 
 pub fn parse_support_information(text: &str) -> Result<Vec<ScreenInfo>> {
     let mut screens = Vec::new();
+    let headers: Vec<_> = screen_header_re().find_iter(text).collect();
 
-    for header in screen_header_re().find_iter(text) {
-        let section = &text[header.start()..];
+    for (i, header) in headers.iter().enumerate() {
+        let end = headers.get(i + 1).map_or(text.len(), regex::Match::start);
+        let section = &text[header.start()..end];
+        // KWin lists disabled outputs without geometry; they cannot host windows.
+        if screen_enabled_re()
+            .captures(section)
+            .is_some_and(|caps| &caps[1] == "0")
+        {
+            continue;
+        }
         let index_caps = screen_header_re()
             .captures(header.as_str())
             .context("failed to parse screen header")?;
@@ -260,6 +275,59 @@ Name: eDP-1
 
         let error = parse_support_information(text).unwrap_err();
         assert!(error.to_string().contains("missing geometry"));
+    }
+
+    #[test]
+    fn skips_disabled_screen_without_geometry() {
+        let text = "\
+Screen 0:
+---------
+Name: eDP-1
+Enabled: 1
+Geometry: 0,0,1920x1200
+Screen 1:
+---------
+Name: DP-1
+Enabled: 0
+
+Compositing
+===========
+";
+
+        let screens = parse_support_information(text).unwrap();
+        assert_eq!(screens.len(), 1);
+        assert_eq!(screens[0].name, "eDP-1");
+    }
+
+    #[test]
+    fn does_not_borrow_geometry_from_next_screen() {
+        let text = "\
+Screen 0:
+Name: DP-1
+Enabled: 0
+Screen 1:
+Name: eDP-1
+Enabled: 1
+Geometry: 0,0,1920x1200
+";
+
+        let screens = parse_support_information(text).unwrap();
+        assert_eq!(screens.len(), 1);
+        assert_eq!((screens[0].index, screens[0].name.as_str()), (1, "eDP-1"));
+    }
+
+    #[test]
+    fn rejects_enabled_screen_without_geometry_even_if_next_has_one() {
+        let text = "\
+Screen 0:
+Name: eDP-1
+Screen 1:
+Name: DP-1
+Geometry: 1920,0,2560x1440
+";
+
+        let error = parse_support_information(text).unwrap_err();
+        assert!(error.to_string().contains("screen 0 is missing geometry"));
     }
 
     #[test]
