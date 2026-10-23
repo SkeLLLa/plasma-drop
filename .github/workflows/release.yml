@@ -490,14 +490,7 @@ jobs:
             <body>
               <h1>plasma-drop package repositories</h1>
               <h2>RPM / DNF / YUM</h2>
-              <pre>sudo tee /etc/yum.repos.d/plasma-drop.repo &gt;/dev/null &lt;&lt;'REPO'
-          [plasma-drop]
-          name=plasma-drop
-          baseurl=${PAGES_URL}/rpm/x86_64
-          enabled=1
-          gpgcheck=0
-          repo_gpgcheck=0
-          REPO
+              <pre>sudo curl -fsSLo /etc/yum.repos.d/plasma-drop.repo ${PAGES_URL}/rpm/plasma-drop.repo
           sudo dnf install plasma-drop</pre>
               <h2>APT</h2>
               <pre>echo 'deb [trusted=yes] ${PAGES_URL}/deb stable main' | sudo tee /etc/apt/sources.list.d/plasma-drop.list

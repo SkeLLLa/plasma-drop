@@ -206,14 +206,7 @@ plasma-drop --config ~/.config/plasma-drop/config.toml
 ### RPM repository
 
 ```bash
-sudo tee /etc/yum.repos.d/plasma-drop.repo >/dev/null <<'EOF'
-[plasma-drop]
-name=plasma-drop
-baseurl=https://skellla.github.io/plasma-drop/rpm/x86_64
-enabled=1
-gpgcheck=0
-repo_gpgcheck=0
-EOF
+sudo curl -fsSLo /etc/yum.repos.d/plasma-drop.repo https://skellla.github.io/plasma-drop/rpm/plasma-drop.repo
 sudo dnf install plasma-drop
 ```
 

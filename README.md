@@ -23,6 +23,10 @@ If you need a GUI, a Windows version, or a broader configuration surface, use th
 On macOS, use the sibling project [quartz-drop](https://github.com/SkeLLLa/quartz-drop). It is a
 Swift port of `plasma-drop` and reads the same config file.
 
+**Contents:** [Install](#install) · [First Run](#first-run) · [Configure Apps](#configure-apps) ·
+[Documentation](#documentation) · [Development](#development) ·
+[Distribution and Releases](#distribution-and-releases) · [Support Ukraine](#support-ukraine)
+
 ## Demo
 
 <p align="center">
@@ -31,80 +35,122 @@ Swift port of `plasma-drop` and reads the same config file.
   </video>
 </p>
 
-## Requirements
-
-- Linux desktop session
-- KDE Plasma 6 on Wayland
-- Session D-Bus
-- KWin scripting support
-
-`plasma-drop` does not target X11 or non-KWin compositors.
-
 ## Install
 
-Pick one install method. All of them target Linux `x86_64`.
+You need KDE Plasma 6 on Wayland, with a session D-Bus and KWin scripting. `plasma-drop` doesn't
+support X11 or other compositors. Packages exist for x86_64 only.
 
-| Method | Command | Service unit and example config |
-| --- | --- | --- |
-| Fedora / RPM | [DNF repository](#rpm-and-apt-repositories), then `sudo dnf install plasma-drop` | Installed by the package |
-| Debian / Ubuntu | [APT repository](#rpm-and-apt-repositories), then `sudo apt install plasma-drop` | Installed by the package |
-| Any (Rust) | `cargo install --locked plasma-drop` | `plasma-drop init --systemd` |
-| mise | `mise use -g github:SkeLLLa/plasma-drop` | `plasma-drop init --systemd` |
-| packslip | `packslip install github.com/SkeLLLa/plasma-drop --pin ps1_4yd5vxao3lfzaox72lynxuotke` | `plasma-drop init --systemd` |
-| Release archive | Extract the [release](https://github.com/SkeLLLa/plasma-drop/releases/latest) `tar.gz`, run `./install-user.sh` | Installed by the script |
+| Distribution | How to install |
+| --- | --- |
+| Fedora and other DNF-based systems | [DNF repository](#fedora-dnf-repository), [.rpm](#a-single-deb-or-rpm-file), [tarball](#any-distribution-tarball) |
+| Debian, Ubuntu and other APT-based systems | [APT repository](#debian-and-ubuntu-apt-repository), [.deb](#a-single-deb-or-rpm-file), [tarball](#any-distribution-tarball) |
+| Any distribution | [tarball](#any-distribution-tarball), [mise, packslip or cargo](#mise-packslip-or-cargo) |
 
-Then finish setup for your method:
+All downloads are on the [latest release](https://github.com/SkeLLLa/plasma-drop/releases/latest)
+page.
 
-```bash
-# Package repositories or a downloaded deb/rpm:
-mkdir -p ~/.config/plasma-drop
-cp /usr/share/plasma-drop/examples/config.toml ~/.config/plasma-drop/config.toml
+### Fedora: DNF repository
 
-# cargo, mise, or packslip: writes ~/.config/plasma-drop/config.toml and
-# ~/.config/systemd/user/plasma-drop.service (use `plasma-drop init` to skip the unit)
-plasma-drop init --systemd
+This is the recommended method: `dnf upgrade` then keeps `plasma-drop` up to date.
 
-# Every method:
-systemctl --user daemon-reload
-systemctl --user enable --now plasma-drop.service
+```sh
+sudo curl -fsSLo /etc/yum.repos.d/plasma-drop.repo https://skellla.github.io/plasma-drop/rpm/plasma-drop.repo
+sudo dnf install plasma-drop
 ```
 
-Notes:
+### Debian and Ubuntu: APT repository
 
-- **mise:** append `@<version>` to pin a release. Releases from 1.9.0 on also publish a signed
-  `packslip.sigstore.json` manifest; `mise use -g packslip:github.com/SkeLLLa/plasma-drop`
-  installs through it.
-- **packslip:** [packslip](https://packslip.dev) verifies the signed release manifest before
-  installing into `~/.local/bin`; add `--version <version>` to pin a release. The `--pin`
-  fingerprint identifies this repository's release workflow and stays the same across releases;
-  check it against this README rather than trusting it on first use.
-- **Release archive:** `install-user.sh` places the binary in `~/.local/bin`, copies the starter
-  config, and installs the user service. The same release page has standalone `deb` and `rpm`
-  files.
-- Native packages install `/usr/bin/plasma-drop`, `/usr/lib/systemd/user/plasma-drop.service`,
-  and `/usr/share/plasma-drop/examples/config.toml`.
+This is the recommended method: `apt upgrade` then keeps `plasma-drop` up to date.
 
-### RPM and APT repositories
-
-These repositories are unsigned; they track every release.
-
-```bash
-# Fedora, openSUSE, other RPM-based systems
-sudo tee /etc/yum.repos.d/plasma-drop.repo >/dev/null <<'EOF'
-[plasma-drop]
-name=plasma-drop
-baseurl=https://skellla.github.io/plasma-drop/rpm/x86_64
-enabled=1
-gpgcheck=0
-repo_gpgcheck=0
-EOF
-sudo dnf install plasma-drop
-
-# Debian, Ubuntu, other APT-based systems
+```sh
 echo 'deb [trusted=yes] https://skellla.github.io/plasma-drop/deb stable main' | sudo tee /etc/apt/sources.list.d/plasma-drop.list
 sudo apt update
 sudo apt install plasma-drop
 ```
+
+The repositories are unsigned (`trusted=yes`, `repo_gpgcheck=0`), so their integrity depends on
+HTTPS to GitHub Pages. They track every release.
+
+### A single .deb or .rpm file
+
+You get no automatic updates with this method. Download the file from the
+[latest release](https://github.com/SkeLLLa/plasma-drop/releases/latest), then run:
+
+```sh
+sudo apt install ./plasma-drop_<version>_amd64.deb      # Debian, Ubuntu
+sudo dnf install ./plasma-drop-<version>-1.x86_64.rpm   # Fedora
+```
+
+Packages install `/usr/bin/plasma-drop`, the user service
+`/usr/lib/systemd/user/plasma-drop.service` and the starter config
+`/usr/share/plasma-drop/examples/config.toml`.
+
+### Any distribution: tarball
+
+This method installs for your user only, into `~/.local`, and doesn't need root. It also copies
+the starter config and installs the user service:
+
+```sh
+tar -xzf plasma-drop-<version>-x86_64-unknown-linux-gnu.tar.gz
+cd plasma-drop-<version>-x86_64-unknown-linux-gnu
+./install-user.sh
+```
+
+### mise, packslip or cargo
+
+These put `plasma-drop` on your `PATH`. Pick one:
+
+```sh
+# mise. Append @<version> to pin a release.
+mise use -g github:SkeLLLa/plasma-drop
+
+# packslip. Checks the signed release manifest before it installs into ~/.local/bin.
+packslip install github.com/SkeLLLa/plasma-drop --pin ps1_4yd5vxao3lfzaox72lynxuotke
+
+# cargo. Builds from crates.io.
+cargo install plasma-drop --locked
+```
+
+The packslip `--pin` fingerprint identifies this repository's release workflow and stays the same
+across releases. Check it against this README rather than trusting it on first use. With mise,
+`mise use -g packslip:github.com/SkeLLLa/plasma-drop` also checks the signed manifest.
+
+### After installing
+
+Create your config, then start the user service:
+
+```sh
+# APT, DNF or a .deb/.rpm file: copy the starter config
+mkdir -p ~/.config/plasma-drop
+cp /usr/share/plasma-drop/examples/config.toml ~/.config/plasma-drop/config.toml
+
+# mise, packslip or cargo: write the config and the user service
+# (use `plasma-drop init` to skip the service)
+plasma-drop init --systemd
+
+# Every method
+systemctl --user daemon-reload
+systemctl --user enable --now plasma-drop.service
+```
+
+The tarball's `install-user.sh` already did the first step. Next, see [First Run](#first-run).
+
+### Uninstall
+
+| Installed with | Remove with |
+| --- | --- |
+First stop the service with `systemctl --user disable --now plasma-drop.service`, then:
+
+| Installed with | Remove with |
+| --- | --- |
+| DNF | `sudo dnf remove plasma-drop`, then `sudo rm /etc/yum.repos.d/plasma-drop.repo` |
+| APT | `sudo apt remove plasma-drop`, then `sudo rm /etc/apt/sources.list.d/plasma-drop.list` |
+| Tarball or packslip | `rm ~/.local/bin/plasma-drop` |
+| mise | `mise unuse -g github:SkeLLLa/plasma-drop` |
+| cargo | `cargo uninstall plasma-drop` |
+
+Every method except the packages also wrote `~/.config/systemd/user/plasma-drop.service`; delete
+it too. Your config in `~/.config/plasma-drop` stays in place until you delete it.
 
 ## First Run
 
@@ -280,7 +326,7 @@ Crates.io publishing uses trusted publishing through GitHub Actions OIDC. After 
 crate publish, configure crates.io to trust `SkeLLLa/plasma-drop` and workflow `release.yml`; no
 long-lived Cargo registry token is required for later releases.
 
-## Support
+## Support Ukraine
 
 If `plasma-drop` is useful to you and you want to say thanks, please consider supporting Ukrainian
 defenders instead of sending money to the author.
@@ -288,3 +334,7 @@ defenders instead of sending money to the author.
 [![Come Back Alive](resources/badges/donate-come-back-alive.svg)](https://savelife.in.ua/en/donate-en/)
 [![Sternenko Fund](resources/badges/donate-sternenko-fund.svg)](https://www.sternenkofund.org/en/donate)
 [![Prytula Foundation](resources/badges/donate-prytula-foundation.svg)](https://prytulafoundation.org/en/donation)
+
+## License
+
+GPL-3.0-or-later. See [COPYING](COPYING).
