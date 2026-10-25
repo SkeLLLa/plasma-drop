@@ -1,3 +1,4 @@
+# Release fails closed until every action is pinned to a commit SHA (pin-gate).
 name: Release
 
 on:
@@ -5,66 +6,118 @@ on:
     branches:
       - master
 
+# One release at a time: a push during a release waits for it instead of cancelling it.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+# Nothing is granted by default; each job asks for what it needs.
+permissions: {}
+
 env:
   CARGO_TERM_COLOR: always
   RUST_TARGET: x86_64-unknown-linux-gnu
 
 jobs:
-  quality:
-    name: Quality gate
+  pin-gate:
+    name: Action pin gate
     if: ${{ github.repository_owner == 'SkeLLLa' && !contains(github.event.head_commit.message, '[skip ci]') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Require every action in every workflow to be pinned
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Fetch every workflow, the checker and its image list, as committed at the
+          # triggering SHA; no checkout, no third-party action. Fails closed: no files, no
+          # listing or any failed fetch fails the gate, and so does an unpinned action in ci.yml.
+          dir="${RUNNER_TEMP}/workflows"
+          mkdir -p "${dir}" "${RUNNER_TEMP}/scripts" "${RUNNER_TEMP}/packaging/ci"
+          fetch() {
+            gh api -H "Accept: application/vnd.github.raw" \
+              "repos/${GITHUB_REPOSITORY}/contents/$1?ref=${GITHUB_SHA}"
+          }
+          names="$(
+            gh api "repos/${GITHUB_REPOSITORY}/contents/.github/workflows?ref=${GITHUB_SHA}" \
+              --jq '.[] | select(.type == "file") | select(.name | test("\\.ya?ml$")) | .name'
+          )"
+          if [ -z "${names}" ]; then
+            echo "::error::no workflow files found at ${GITHUB_SHA}"
+            exit 1
+          fi
+          files=()
+          while IFS= read -r name; do
+            case "${name}" in */* | "") echo "::error::unexpected workflow name"; exit 1 ;; esac
+            fetch ".github/workflows/${name}" > "${dir}/${name}"
+            files+=("${dir}/${name}")
+          done <<< "${names}"
+          fetch scripts/check-action-pins.sh > "${RUNNER_TEMP}/scripts/check-action-pins.sh"
+          fetch packaging/ci/images.env > "${RUNNER_TEMP}/packaging/ci/images.env"
+          sh "${RUNNER_TEMP}/scripts/check-action-pins.sh" "${files[@]}"
+
+  quality:
+    name: Quality gate
+    needs: pin-gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
-      - name: Install stable Rust with clippy and rustfmt
-        uses: dtolnay/rust-toolchain@stable
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
+
+      # Release workflows use no cache, so a poisoned PR cache can't reach a release build.
+      - name: Install stable Rust with clippy and rustfmt
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
           components: clippy,rustfmt
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
+
       - name: Run quality checks
         run: make check
 
+  # Bumps the version, publishes the crate, creates the tag and the GitHub release, then builds
+  # and checks the packages. It uploads nothing to the release: the assets go out only after
+  # sign-linux, verify-linux and checksums (publish-assets).
   release:
     name: Release
     needs: quality
-    if: ${{ github.repository_owner == 'SkeLLLa' && !contains(github.event.head_commit.message, '[skip ci]') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     outputs:
       released: ${{ steps.release-plz.outputs.released }}
       version: ${{ steps.release-plz.outputs.version }}
       tag_name: ${{ steps.release-plz.outputs.tag_name }}
-    concurrency:
-      group: release-${{ github.ref }}
-      cancel-in-progress: false
     permissions:
       contents: write
       id-token: write
-      attestations: write
     steps:
+      # This job pushes the version bump, so its checkout keeps the token.
       - name: Checkout repository
-        uses: actions/checkout@v7
+        # zizmor: ignore[artipacked]
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
+          toolchain: stable
           targets: x86_64-unknown-linux-gnu
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
 
       - name: Authenticate to crates.io (trusted publishing)
         id: crates-auth
-        uses: rust-lang/crates-io-auth-action@v1
+        uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
 
       - name: Install cargo-binstall
-        uses: cargo-bins/cargo-binstall@v1.26.0
+        uses: cargo-bins/cargo-binstall@8a2045612414e945291083f820cd50b4d8fc2218 # v1.26.0
 
       # Install via cargo-binstall like release-plz/action does: it picks the gnu build, while
       # install-action only ships musl builds, which fail parsing the changelog template since
@@ -108,17 +161,19 @@ jobs:
           RELEASED="$(jq -r '((.releases // []) | length > 0)' "${OUTPUT_FILE}")"
           VERSION="$(jq -r '(.releases // [])[0].version // ""' "${OUTPUT_FILE}")"
           TAG_NAME="$(jq -r '(.releases // [])[0].tag // ""' "${OUTPUT_FILE}")"
-          echo "released=${RELEASED}" >> "${GITHUB_OUTPUT}"
-          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
-          echo "tag_name=${TAG_NAME}" >> "${GITHUB_OUTPUT}"
-          echo "releases=${RELEASES}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "released=${RELEASED}"
+            echo "version=${VERSION}"
+            echo "tag_name=${TAG_NAME}"
+            echo "releases=${RELEASES}"
+          } >> "${GITHUB_OUTPUT}"
 
       # Independent: tool compiles use cargo install's own temp target dir, so they don't
       # contend with the release build for the target/ lock.
       - parallel:
           - name: Install packaging tools
             if: ${{ steps.release-plz.outputs.released == 'true' }}
-            run: cargo install --locked cargo-deb cargo-generate-rpm
+            run: cargo install --locked cargo-deb@3.8.0 cargo-generate-rpm@0.21.0
 
           - name: Install package verification tools
             if: ${{ steps.release-plz.outputs.released == 'true' }}
@@ -146,17 +201,24 @@ jobs:
 
       - name: Build deb package
         if: ${{ steps.release-plz.outputs.released == 'true' }}
-        run: cargo deb --no-build --target "${RUST_TARGET}" --output "target/debian/plasma-drop_${{ steps.release-plz.outputs.version }}_amd64.deb"
+        env:
+          VERSION: ${{ steps.release-plz.outputs.version }}
+        run: cargo deb --no-build --target "${RUST_TARGET}" --output "target/debian/plasma-drop_${VERSION}_amd64.deb"
 
       - name: Build rpm package
         if: ${{ steps.release-plz.outputs.released == 'true' }}
-        run: cargo generate-rpm --target "${RUST_TARGET}" --output "target/generate-rpm/plasma-drop-${{ steps.release-plz.outputs.version }}-1.x86_64.rpm"
+        env:
+          VERSION: ${{ steps.release-plz.outputs.version }}
+        run: cargo generate-rpm --target "${RUST_TARGET}" --output "target/generate-rpm/plasma-drop-${VERSION}-1.x86_64.rpm"
 
       - name: Verify binary archive contents
         if: ${{ steps.release-plz.outputs.released == 'true' }}
+        env:
+          VERSION: ${{ steps.release-plz.outputs.version }}
         run: |
-          archive="target/dist/plasma-drop-${{ steps.release-plz.outputs.version }}-${RUST_TARGET}.tar.gz"
-          root="plasma-drop-${{ steps.release-plz.outputs.version }}-${RUST_TARGET}"
+          set -euo pipefail
+          archive="target/dist/plasma-drop-${VERSION}-${RUST_TARGET}.tar.gz"
+          root="plasma-drop-${VERSION}-${RUST_TARGET}"
           for path in \
             "${root}/install-user.sh" \
             "${root}/bin/plasma-drop" \
@@ -170,8 +232,11 @@ jobs:
 
       - name: Verify deb package contents
         if: ${{ steps.release-plz.outputs.released == 'true' }}
+        env:
+          VERSION: ${{ steps.release-plz.outputs.version }}
         run: |
-          package="target/debian/plasma-drop_${{ steps.release-plz.outputs.version }}_amd64.deb"
+          set -euo pipefail
+          package="target/debian/plasma-drop_${VERSION}_amd64.deb"
           for path in \
             ./usr/bin/plasma-drop \
             ./usr/lib/systemd/user/plasma-drop.service \
@@ -184,8 +249,11 @@ jobs:
 
       - name: Verify rpm package contents
         if: ${{ steps.release-plz.outputs.released == 'true' }}
+        env:
+          VERSION: ${{ steps.release-plz.outputs.version }}
         run: |
-          package="target/generate-rpm/plasma-drop-${{ steps.release-plz.outputs.version }}-1.x86_64.rpm"
+          set -euo pipefail
+          package="target/generate-rpm/plasma-drop-${VERSION}-1.x86_64.rpm"
           for path in \
             /usr/bin/plasma-drop \
             /usr/lib/systemd/user/plasma-drop.service \
@@ -196,77 +264,250 @@ jobs:
             rpm -qlp "${package}" | grep -Fx "${path}" >/dev/null
           done
 
-      - name: Stage release artifacts
+      # One artifact per kind; sign-linux replaces release-linux-rpm with the signed file.
+      - name: Keep the tarball
         if: ${{ steps.release-plz.outputs.released == 'true' }}
-        id: stage
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-linux-tar
+          retention-days: 1
+          if-no-files-found: error
+          path: target/dist/plasma-drop-${{ steps.release-plz.outputs.version }}-${{ env.RUST_TARGET }}.tar.gz
+
+      - name: Keep the deb package
+        if: ${{ steps.release-plz.outputs.released == 'true' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-linux-deb
+          retention-days: 1
+          if-no-files-found: error
+          path: target/debian/plasma-drop_${{ steps.release-plz.outputs.version }}_amd64.deb
+
+      - name: Keep the rpm package
+        if: ${{ steps.release-plz.outputs.released == 'true' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-linux-rpm
+          retention-days: 1
+          if-no-files-found: error
+          path: target/generate-rpm/plasma-drop-${{ steps.release-plz.outputs.version }}-1.x86_64.rpm
+
+  # Signs the .rpm with the subkey held in the linux-signing environment, checked against the
+  # pin packaging/signing/repo.asc; without the pin (and the secret) the package passes through
+  # unsigned. The .deb carries no signature of its own: APT checks the repository's signed
+  # InRelease instead (the repo job). No build runs in a job that holds the key.
+  sign-linux:
+    name: Sign Linux packages
+    needs: release
+    if: ${{ needs.release.outputs.released == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    container: fedora:44@sha256:43b29f65a41eb9c35e1cd5323e3bdf3b655c2357a9f4f1ff2f9c2798e5045d80
+    permissions:
+      contents: read
+    # The key lives only in this environment's secrets, limited to master; see
+    # docs/distribution.md#linux-signing.
+    environment: linux-signing
+    steps:
+      - name: Install git, rpm-sign and gnupg
+        run: dnf install -y -q git-core rpm-sign gnupg2
+
+      - name: Checkout release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release.outputs.tag_name }}
+          persist-credentials: false
+
+      - name: Fetch the package
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-linux-rpm
+          path: dist
+
+      # The key is imported, used and removed in this one step; import fails closed against
+      # the pin and sets LINUX_SIGNED.
+      - name: Sign the package
         env:
-          VERSION: ${{ steps.release-plz.outputs.version }}
+          REPO_SIGNING_KEY: ${{ secrets.REPO_SIGNING_KEY }}
         run: |
-          STAGE="target/release-assets"
-          mkdir -p "${STAGE}"
-          cp "target/dist/plasma-drop-${VERSION}-${RUST_TARGET}.tar.gz" "${STAGE}/"
-          cp "target/debian/plasma-drop_${VERSION}_amd64.deb" "${STAGE}/"
-          cp "target/generate-rpm/plasma-drop-${VERSION}-1.x86_64.rpm" "${STAGE}/"
-          (
-            cd "${STAGE}"
-            assets=(
-              "plasma-drop-${VERSION}-${RUST_TARGET}.tar.gz"
-              "plasma-drop_${VERSION}_amd64.deb"
-              "plasma-drop-${VERSION}-1.x86_64.rpm"
-            )
-            for asset in "${assets[@]}"; do
-              sha256sum -- "${asset}" > "${asset}.sha256"
-            done
-            sha256sum -- "${assets[@]}" > SHA256SUMS
+          set -eu
+          export GNUPGHOME="${RUNNER_TEMP}/gnupg"
+          mkdir -m 700 "${GNUPGHOME}"
+          trap 'rm -rf "${GNUPGHOME}"' EXIT
+          packaging/ci/linux-signing.sh import
+          if [ -f packaging/signing/repo.asc ]; then
+            packaging/ci/linux-signing.sh sign-rpm dist/*.rpm
+          fi
+
+      - name: Replace the package with the signed one
+        if: ${{ env.LINUX_SIGNED == 'true' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-linux-rpm
+          retention-days: 1
+          if-no-files-found: error
+          overwrite: true
+          path: dist/*.rpm
+
+  # Install the packages about to be published on clean systems, as users would.
+  verify-linux:
+    name: Verify Linux ${{ matrix.kind }} (${{ matrix.name }})
+    needs: [release, sign-linux]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    container: ${{ matrix.image }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: fedora-44, image: "fedora:44@sha256:43b29f65a41eb9c35e1cd5323e3bdf3b655c2357a9f4f1ff2f9c2798e5045d80", kind: rpm }
+          - { name: debian-trixie, image: "debian:trixie@sha256:4c25275446ca371766b8b093c696782eabce06263fccacb8d5d813b3dc44b308", kind: deb }
+          - { name: ubuntu-26.04, image: "ubuntu:26.04@sha256:c098726dd9b9733f3e885f8de0ef375206a311b0a317eadc40d347b1115fb944", kind: deb }
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release.outputs.tag_name }}
+          persist-credentials: false
+
+      - name: Fetch the package
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-linux-${{ matrix.kind }}
+          path: dist
+
+      # As dnf checks it with gpgcheck=1, against the committed key rather than the one used.
+      - name: Check the package signature
+        if: ${{ matrix.kind == 'rpm' }}
+        run: |
+          if [ -f packaging/signing/repo.asc ]; then
+            dnf install -y -q gnupg2
+            packaging/ci/linux-signing.sh check-rpm dist/*.rpm
+          else
+            echo "packaging/signing/repo.asc is not committed: the package is unsigned"
+          fi
+
+      - name: Install and run
+        env:
+          KIND: ${{ matrix.kind }}
+        run: |
+          set -eu
+          if [ "${KIND}" = rpm ]; then
+            dnf install -y -q ./dist/*.rpm
+          else
+            apt-get update -qq
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ./dist/*.deb
+          fi
+          plasma-drop --version
+          plasma-drop print-example-config > /dev/null
+          test -f /usr/lib/systemd/user/plasma-drop.service
+
+  # Every asset is hashed and attested after it is built and verified, so SHA256SUMS lists
+  # exactly the signed files that publish-assets uploads.
+  checksums:
+    name: Checksums and provenance
+    needs: [release, sign-linux, verify-linux]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    env:
+      VERSION: ${{ needs.release.outputs.version }}
+    steps:
+      - name: Fetch the assets
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Write checksums
+        run: |
+          set -euo pipefail
+          cd release-assets
+          expected=(
+            "plasma-drop-${VERSION}-${RUST_TARGET}.tar.gz"
+            "plasma-drop_${VERSION}_amd64.deb"
+            "plasma-drop-${VERSION}-1.x86_64.rpm"
           )
+          for f in "${expected[@]}"; do
+            test -f "${f}" || { echo "::error::${f} is missing"; exit 1; }
+            sha256sum -- "${f}" > "${f}.sha256"
+          done
+          if [ "$(find . -maxdepth 1 -type f ! -name '*.sha256' | wc -l)" -ne "${#expected[@]}" ]; then
+            echo "::error::unexpected files in release-assets"
+            ls -la
+            exit 1
+          fi
+          sha256sum -- "${expected[@]}" > SHA256SUMS
+          cat SHA256SUMS
 
       - name: Attest build provenance
-        if: ${{ steps.release-plz.outputs.released == 'true' }}
-        uses: actions/attest-build-provenance@v4
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: |
-            target/release-assets/plasma-drop-${{ steps.release-plz.outputs.version }}-${{ env.RUST_TARGET }}.tar.gz
-            target/release-assets/plasma-drop_${{ steps.release-plz.outputs.version }}_amd64.deb
-            target/release-assets/plasma-drop-${{ steps.release-plz.outputs.version }}-1.x86_64.rpm
+            release-assets/*.tar.gz
+            release-assets/*.deb
+            release-assets/*.rpm
 
-      - name: Publish release assets
-        if: ${{ steps.release-plz.outputs.released == 'true' }}
-        uses: softprops/action-gh-release@v3
+      # publish-assets merges these with the assets; the name must not match release-*.
+      - name: Keep the checksums
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          tag_name: ${{ steps.release-plz.outputs.tag_name }}
-          append_body: true
-          fail_on_unmatched_files: true
-          files: |
-            target/release-assets/plasma-drop-${{ steps.release-plz.outputs.version }}-${{ env.RUST_TARGET }}.tar.gz
-            target/release-assets/plasma-drop_${{ steps.release-plz.outputs.version }}_amd64.deb
-            target/release-assets/plasma-drop-${{ steps.release-plz.outputs.version }}-1.x86_64.rpm
-            target/release-assets/plasma-drop-${{ steps.release-plz.outputs.version }}-${{ env.RUST_TARGET }}.tar.gz.sha256
-            target/release-assets/plasma-drop_${{ steps.release-plz.outputs.version }}_amd64.deb.sha256
-            target/release-assets/plasma-drop-${{ steps.release-plz.outputs.version }}-1.x86_64.rpm.sha256
-            target/release-assets/SHA256SUMS
-
-      - name: Upload package repository inputs
-        if: ${{ steps.release-plz.outputs.released == 'true' }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: package-repository-inputs
+          name: checksums
           retention-days: 1
+          if-no-files-found: error
           path: |
-            target/release-assets/plasma-drop_${{ steps.release-plz.outputs.version }}_amd64.deb
-            target/release-assets/plasma-drop-${{ steps.release-plz.outputs.version }}-1.x86_64.rpm
+            release-assets/*.sha256
+            release-assets/SHA256SUMS
+
+  publish-assets:
+    name: Publish release assets
+    needs: [release, checksums]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Fetch the assets and checksums
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Upload to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ needs.release.outputs.tag_name }}
+          VERSION: ${{ needs.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          cd release-assets
+          assets=(
+            "plasma-drop-${VERSION}-${RUST_TARGET}.tar.gz"
+            "plasma-drop_${VERSION}_amd64.deb"
+            "plasma-drop-${VERSION}-1.x86_64.rpm"
+          )
+          files=("${assets[@]}" SHA256SUMS)
+          for f in "${assets[@]}"; do files+=("${f}.sha256"); done
+          gh release upload "${TAG_NAME}" "${files[@]}" --repo "${GITHUB_REPOSITORY}" --clobber
 
   packslip:
     name: Sign packslip manifest
-    needs: release
-    if: ${{ needs.release.outputs.released == 'true' }}
+    needs: [release, publish-assets]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     # Signing never holds release-write access; publish-packslip uploads the bundle.
     permissions:
       contents: read
       id-token: write
     steps:
-      # The tag sits on the release-plz version-bump commit, not on github.sha (the push
-      # that triggered this run), so record the commit the tag actually names.
+      # The tag sits on the release-plz version-bump commit, not on github.sha (the push that
+      # triggered this run), so record the commit the tag actually names.
       - name: Resolve tagged commit
         id: source
         env:
@@ -277,10 +518,10 @@ jobs:
           echo "commit=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${TAG_NAME}" --jq .sha)" >> "${GITHUB_OUTPUT}"
 
       # Signs the tarball already attached to the release, so the manifest covers exactly
-      # what users download. The release job attested it, hence attest: link.
+      # what users download. The checksums job attested it, hence attest: link.
       - name: Sign packslip manifest
         id: packslip
-        uses: jdx/packslip@v1
+        uses: jdx/packslip@7d397618045bd98b76cd5cb8177767b2f52789b8 # v1.10.1
         with:
           download: plasma-drop-*-${{ env.RUST_TARGET }}.tar.gz
           bin: plasma-drop
@@ -291,7 +532,7 @@ jobs:
           upload: false
 
       - name: Keep signed bundle
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: packslip-bundle
           retention-days: 1
@@ -302,11 +543,12 @@ jobs:
     name: Publish packslip manifest
     needs: [release, packslip]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:
       - name: Fetch signed bundle
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: packslip-bundle
           path: packslip
@@ -324,6 +566,7 @@ jobs:
     name: Verify published packslip manifest
     needs: [release, publish-packslip]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
     env:
@@ -331,7 +574,7 @@ jobs:
       PACKSLIP_PIN: ps1_4yd5vxao3lfzaox72lynxuotke
     steps:
       - name: Install packslip
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2.87.30
         with:
           tool: packslip@1.6.0
 
@@ -352,171 +595,125 @@ jobs:
             --pin "${PACKSLIP_PIN}" \
             --artifact "${asset}"
 
-  package-repositories:
-    name: Publish package repositories
-    needs: release
-    if: ${{ needs.release.outputs.released == 'true' }}
-    runs-on: ubuntu-latest
-    concurrency:
-      group: package-repositories
-      cancel-in-progress: false
+  # The APT and DNF repositories on GitHub Pages (Settings → Pages → Source: GitHub Actions):
+  # packaging/ci/pages-repo.sh builds them from this run's verified .deb and .rpm plus those of
+  # the 9 releases before it, since each deploy replaces the site. Unsigned until
+  # packaging/signing/repo.asc is committed; from then on the metadata and every .rpm are
+  # signed with that key, and the release fails without it (docs/distribution.md#linux-signing).
+  # PAGES_BASE_URL overrides the URL for a custom domain. This job holds the signing key and
+  # builds the site; `pages` only deploys it.
+  repo:
+    name: Build APT and DNF repositories
+    needs: [release, publish-assets]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # Trixie's rpm (4.20, Sequoia) reads a pin with revoked subkeys; the runner's 4.18 can't.
+    container: debian:trixie@sha256:4c25275446ca371766b8b093c696782eabce06263fccacb8d5d813b3dc44b308
+    # In a container, run steps default to sh (dash); these use mapfile and ${var,,}.
+    defaults:
+      run:
+        shell: bash
+    environment: linux-signing
     permissions:
       contents: read
-      pages: write
-      id-token: write
+    env:
+      VERSION: ${{ needs.release.outputs.version }}
+      TAG_NAME: ${{ needs.release.outputs.tag_name }}
+    steps:
+      # rpm for rpmsign and rpmkeys, which also sign the earlier releases' .rpm files.
+      - name: Install git, gh, apt-ftparchive, createrepo_c and rpm
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends ca-certificates git gh gnupg apt-utils createrepo-c rpm
+
+      - name: Checkout release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.TAG_NAME }}
+          persist-credentials: false
+
+      - name: Fetch this release's packages
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-linux-{deb,rpm}
+          path: assets
+          merge-multiple: true
+
+      # The 9 releases before this one, so users can still pin or downgrade.
+      - name: Fetch earlier releases' packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mapfile -t tags < <(
+            gh release list --repo "${GITHUB_REPOSITORY}" --limit 30 \
+              --json tagName,isDraft,isPrerelease \
+              --jq '.[] | select(.isDraft == false and .isPrerelease == false) | .tagName' |
+              grep -vxF "${TAG_NAME}" | head -n 9 || true
+          )
+          for tag in "${tags[@]}"; do
+            gh release download "${tag}" --repo "${GITHUB_REPOSITORY}" --dir assets --skip-existing \
+              --pattern 'plasma-drop_*_amd64.deb' --pattern 'plasma-drop-*-1.x86_64.rpm' ||
+              echo "${tag}: no Linux packages"
+          done
+          ls -l assets
+
+      # import fails closed against the pin, as in sign-linux, and sets LINUX_SIGNED.
+      - name: Build the repositories
+        env:
+          REPO_SIGNING_KEY: ${{ secrets.REPO_SIGNING_KEY }}
+          PAGES_BASE_URL: ${{ vars.PAGES_BASE_URL }}
+        run: |
+          set -euo pipefail
+          export GNUPGHOME="${RUNNER_TEMP}/gnupg"
+          mkdir -m 700 "${GNUPGHOME}"
+          trap 'rm -rf "${GNUPGHOME}"' EXIT
+          packaging/ci/linux-signing.sh import
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          base="${PAGES_BASE_URL:-https://${owner}.github.io/${GITHUB_REPOSITORY#*/}}"
+          packaging/ci/pages-repo.sh assets site "${base}" "${VERSION}"
+
+      - name: Verify the repositories
+        run: |
+          set -euo pipefail
+          for f in index.html deb/index.html rpm/index.html deb/dists/stable/Release \
+            deb/plasma-drop.list rpm/plasma-drop.repo rpm/x86_64/repodata/repomd.xml \
+            deb/dists/stable/main/binary-amd64/Packages.gz; do
+            test -s "site/${f}"
+          done
+          gzip -cd site/deb/dists/stable/main/binary-amd64/Packages.gz |
+            grep -Ex "Version: ${VERSION}(-[0-9]+)?" > /dev/null
+          if [ "${LINUX_SIGNED}" = "true" ]; then
+            test -s site/plasma-drop.asc
+            test -s site/deb/dists/stable/InRelease
+            test -s site/rpm/x86_64/repodata/repomd.xml.asc
+            grep -qx gpgcheck=1 site/rpm/plasma-drop.repo
+            packaging/ci/linux-signing.sh check-rpm site/rpm/*/*.rpm
+          fi
+
+      - name: Upload the site
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+
+  pages:
+    name: Publish APT and DNF repositories (GitHub Pages)
+    needs: repo
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    concurrency:
+      group: release-pages
+      cancel-in-progress: false
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      url: ${{ steps.deploy.outputs.page_url }}
+    permissions:
+      pages: write
+      id-token: write
     steps:
-      - name: Download current package artifacts
-        uses: actions/download-artifact@v8
-        with:
-          name: package-repository-inputs
-          path: target/release-assets
-
-      - name: Install repository tools
-        run: sudo apt-get update && sudo apt-get install -y createrepo-c dpkg-dev
-
-      - name: Build GitHub Pages package repositories
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG_NAME: ${{ needs.release.outputs.tag_name }}
-          VERSION: ${{ needs.release.outputs.version }}
-          PAGES_URL: https://skellla.github.io/plasma-drop
-        run: |
-          set -euo pipefail
-
-          repo_root="public"
-          rpm_dir="${repo_root}/rpm/x86_64"
-          deb_root="${repo_root}/deb"
-          deb_pool="${deb_root}/pool/main/p/plasma-drop"
-          deb_binary="${deb_root}/dists/stable/main/binary-amd64"
-          previous_assets="${RUNNER_TEMP}/previous-package-assets"
-
-          mkdir -p "${rpm_dir}" "${deb_pool}" "${deb_binary}" "${previous_assets}"
-
-          mapfile -t previous_tags < <(
-            gh release list \
-              --repo "${GITHUB_REPOSITORY}" \
-              --limit 20 \
-              --json tagName,isDraft,isPrerelease \
-              --jq '.[] | select(.isDraft == false and .isPrerelease == false) | .tagName' \
-              | grep -vxF "${TAG_NAME}" \
-              | head -9 || true
-          )
-
-          for tag in "${previous_tags[@]}"; do
-            tag_dir="${previous_assets}/${tag}"
-            mkdir -p "${tag_dir}"
-            gh release download "${tag}" \
-              --repo "${GITHUB_REPOSITORY}" \
-              --pattern 'plasma-drop-*-1.x86_64.rpm' \
-              --pattern 'plasma-drop_*_amd64.deb' \
-              --dir "${tag_dir}" \
-              --clobber || true
-          done
-
-          find "${previous_assets}" -type f -name '*.rpm' -exec cp -n {} "${rpm_dir}/" \;
-          find "${previous_assets}" -type f -name '*.deb' -exec cp -n {} "${deb_pool}/" \;
-          cp "target/release-assets/plasma-drop-${VERSION}-1.x86_64.rpm" "${rpm_dir}/"
-          cp "target/release-assets/plasma-drop_${VERSION}_amd64.deb" "${deb_pool}/"
-
-          createrepo_c --update --compatibility "${rpm_dir}"
-
-          (
-            cd "${deb_root}"
-            dpkg-scanpackages --multiversion --arch amd64 pool /dev/null > dists/stable/main/binary-amd64/Packages
-            gzip -9 -kf dists/stable/main/binary-amd64/Packages
-          )
-
-          write_hash_block() {
-            local label="$1"
-            shift
-            echo "${label}:"
-            for file in "$@"; do
-              local hash
-              local size
-              case "${label}" in
-                MD5Sum) hash="$(md5sum "${file}" | awk '{ print $1 }')" ;;
-                SHA1) hash="$(sha1sum "${file}" | awk '{ print $1 }')" ;;
-                SHA256) hash="$(sha256sum "${file}" | awk '{ print $1 }')" ;;
-              esac
-              size="$(wc -c < "${file}")"
-              printf ' %s %16s %s\n' "${hash}" "${size}" "${file}"
-            done
-          }
-
-          (
-            cd "${deb_root}/dists/stable"
-            {
-              echo "Origin: plasma-drop"
-              echo "Label: plasma-drop"
-              echo "Suite: stable"
-              echo "Codename: stable"
-              echo "Date: $(date -Ru)"
-              echo "Architectures: amd64"
-              echo "Components: main"
-              echo "Description: plasma-drop APT repository"
-              write_hash_block MD5Sum main/binary-amd64/Packages main/binary-amd64/Packages.gz
-              write_hash_block SHA1 main/binary-amd64/Packages main/binary-amd64/Packages.gz
-              write_hash_block SHA256 main/binary-amd64/Packages main/binary-amd64/Packages.gz
-            } > Release
-          )
-
-          cat > "${repo_root}/rpm/plasma-drop.repo" <<EOF
-          [plasma-drop]
-          name=plasma-drop
-          baseurl=${PAGES_URL}/rpm/x86_64
-          enabled=1
-          gpgcheck=0
-          repo_gpgcheck=0
-          EOF
-
-          cat > "${deb_root}/plasma-drop.list" <<EOF
-          deb [trusted=yes] ${PAGES_URL}/deb stable main
-          EOF
-
-          cat > "${repo_root}/.nojekyll" <<EOF
-          EOF
-
-          cat > "${repo_root}/index.html" <<EOF
-          <!doctype html>
-          <html lang="en">
-            <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1">
-              <title>plasma-drop package repositories</title>
-            </head>
-            <body>
-              <h1>plasma-drop package repositories</h1>
-              <h2>RPM / DNF / YUM</h2>
-              <pre>sudo curl -fsSLo /etc/yum.repos.d/plasma-drop.repo ${PAGES_URL}/rpm/plasma-drop.repo
-          sudo dnf install plasma-drop</pre>
-              <h2>APT</h2>
-              <pre>echo 'deb [trusted=yes] ${PAGES_URL}/deb stable main' | sudo tee /etc/apt/sources.list.d/plasma-drop.list
-          sudo apt update
-          sudo apt install plasma-drop</pre>
-              <p>These repositories are unsigned. GitHub Releases remain the long-term artifact archive.</p>
-            </body>
-          </html>
-          EOF
-
-      - name: Verify generated package repositories
-        run: |
-          set -euo pipefail
-          test -f public/rpm/x86_64/repodata/repomd.xml
-          test -f public/deb/dists/stable/Release
-          test -f public/deb/dists/stable/main/binary-amd64/Packages.gz
-          gzip -cd public/deb/dists/stable/main/binary-amd64/Packages.gz | grep -q '^Package: plasma-drop$'
-
       - name: Configure GitHub Pages
-        uses: actions/configure-pages@v6
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
 
-      - name: Upload GitHub Pages artifact
-        uses: actions/upload-pages-artifact@v5
-        with:
-          path: public
-
-      - name: Deploy GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v5
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

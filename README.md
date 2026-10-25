@@ -63,13 +63,19 @@ sudo dnf install plasma-drop
 This is the recommended method: `apt upgrade` then keeps `plasma-drop` up to date.
 
 ```sh
-echo 'deb [trusted=yes] https://skellla.github.io/plasma-drop/deb stable main' | sudo tee /etc/apt/sources.list.d/plasma-drop.list
+sudo install -d -m 0755 /etc/apt/keyrings
+sudo curl -fsSLo /etc/apt/keyrings/plasma-drop.asc https://skellla.github.io/plasma-drop/plasma-drop.asc
+echo 'deb [signed-by=/etc/apt/keyrings/plasma-drop.asc] https://skellla.github.io/plasma-drop/deb stable main' | sudo tee /etc/apt/sources.list.d/plasma-drop.list
 sudo apt update
 sudo apt install plasma-drop
 ```
 
-The repositories are unsigned (`trusted=yes`, `repo_gpgcheck=0`), so their integrity depends on
-HTTPS to GitHub Pages. They track every release.
+The packages and the repository metadata are signed with the plasma-drop packages key,
+[plasma-drop.asc](https://skellla.github.io/plasma-drop/plasma-drop.asc) (the same as
+[packaging/signing/repo.asc](packaging/signing/repo.asc)); APT and DNF refuse anything it didn't
+sign. DNF asks you to confirm the key's fingerprint on the first install. The repositories keep
+the 10 most recent releases, so you can also pin or downgrade a version
+([details](docs/distribution.md#linux-signing)).
 
 ### A single .deb or .rpm file
 
@@ -137,14 +143,12 @@ The tarball's `install-user.sh` already did the first step. Next, see [First Run
 
 ### Uninstall
 
-| Installed with | Remove with |
-| --- | --- |
 First stop the service with `systemctl --user disable --now plasma-drop.service`, then:
 
 | Installed with | Remove with |
 | --- | --- |
 | DNF | `sudo dnf remove plasma-drop`, then `sudo rm /etc/yum.repos.d/plasma-drop.repo` |
-| APT | `sudo apt remove plasma-drop`, then `sudo rm /etc/apt/sources.list.d/plasma-drop.list` |
+| APT | `sudo apt remove plasma-drop`, then `sudo rm /etc/apt/sources.list.d/plasma-drop.list /etc/apt/keyrings/plasma-drop.asc` |
 | Tarball or packslip | `rm ~/.local/bin/plasma-drop` |
 | mise | `mise unuse -g github:SkeLLLa/plasma-drop` |
 | cargo | `cargo uninstall plasma-drop` |
@@ -307,7 +311,7 @@ detailed install layout and CI plan live in [docs/distribution.md](docs/distribu
 
 Version bumps, changelog updates, tags, and GitHub releases are managed with `release-plz`.
 Maintainers should use Conventional Commits so release-plz can infer the correct SemVer bump. CI
-enforces this with `opensource-nepal/commitlint@v1` on pull requests, except for Dependabot's
+enforces this with `opensource-nepal/commitlint` on pull requests, except for Dependabot's
 generated dependency update commits.
 
 The repo release flow is:
@@ -320,7 +324,8 @@ The repo release flow is:
 6. The workflow also attaches `SHA256SUMS` and one `.sha256` checksum sidecar per artifact
 7. Separate jobs sign a `packslip.sigstore.json` manifest for the `tar.gz`, upload it, and verify
    the published release against the signer fingerprint above
-8. The workflow publishes unsigned RPM/APT repository metadata to GitHub Pages
+8. The workflow signs the `rpm`, then publishes signed RPM/APT repositories to GitHub Pages
+   ([Linux signing](docs/distribution.md#linux-signing))
 
 Crates.io publishing uses trusted publishing through GitHub Actions OIDC. After the first manual
 crate publish, configure crates.io to trust `SkeLLLa/plasma-drop` and workflow `release.yml`; no

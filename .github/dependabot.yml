@@ -2,6 +2,9 @@ version: 2
 updates:
   - package-ecosystem: 'cargo'
     directory: '/'
+    # Updates only once a release has been out a week, so a compromised one has time to be pulled.
+    cooldown:
+      default-days: 7
     schedule:
       interval: 'weekly'
     groups:
@@ -21,6 +24,9 @@ updates:
       include: 'scope'
   - package-ecosystem: 'github-actions'
     directory: '/'
+    # Updates only once a release has been out a week, so a compromised one has time to be pulled.
+    cooldown:
+      default-days: 7
     schedule:
       interval: 'weekly'
     groups:

@@ -22,8 +22,11 @@ exclude = [
   "/Makefile",
   "/clippy.toml",
   "/docs/*/",
+  "/packaging/ci/",
   "/packaging/dist/",
+  "/packaging/signing/",
   "/release-plz.toml",
+  "/scripts/",
   "/target/",
   "/wtq",
 ]

@@ -5,51 +5,134 @@ on:
     branches: [master]
   pull_request:
 
+# Nothing is granted by default; each job asks for what it needs.
+permissions: {}
+
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
 
 jobs:
   conventional-commits:
     name: Conventional commit messages
     if: github.event_name == 'pull_request' && github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: read
       pull-requests: read
     steps:
       - name: Verify Conventional Commit messages
-        uses: opensource-nepal/commitlint@v2
+        uses: opensource-nepal/commitlint@9c112b70de7b0e51f81d12a5268a451db5419794 # v2.0.0
 
-  rust-quality:
-    name: Rust quality (stable)
+  # Every action is pinned to a commit SHA and every container image to a digest listed in
+  # packaging/ci/images.env (Dependabot bumps the action SHAs and their version comments). An
+  # unpinned one fails here and in the release pin-gate.
+  pin-check:
+    name: Action pins
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v7
-      - name: Install stable Rust with clippy and rustfmt
-        uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
+      - name: Test the pin checker
+        run: scripts/test-action-pins.sh
+      - name: Check action pins
+        run: scripts/check-action-pins.sh .github/workflows/*.yml
+
+  # Static analysis of the workflows (injection, excessive permissions, unpinned actions...).
+  zizmor:
+    name: Workflow security (zizmor)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Run zizmor
+        uses: zizmorcore/zizmor-action@85b2b9fb8e3325e7a23d7d0a9d7ba5ae0f999e3e # v0.7.1
+        with:
+          advanced-security: false
+
+  actions-lint:
+    name: Workflow and shell lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # mise 2026.10.14, pinned by checksum. mise.lock pins the tools (the action adds --locked).
+      - name: Install jactionlint, shellcheck (versions from .mise.toml)
+        uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
+        with:
+          version: 2026.10.14
+          sha256: 50be7185bcf75929f01cc5630276bcb43ca367f7c5b176e2580903d28c611dc4
+          install_args: jactionlint shellcheck
+          cache: false
+      - name: Show tools
+        run: |
+          jactionlint --version
+          shellcheck --version
+      - name: make lint-shell lint-actions
+        run: make lint-shell lint-actions
+
+  # Only master saves the cache, so a pull request can't plant one that master or a release
+  # restores. release.yml uses no cache at all.
+  rust-quality:
+    name: Rust quality (stable)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install stable Rust with clippy and rustfmt
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
           components: clippy,rustfmt
       - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Run quality checks
         run: make check
+      # What crates.io would get, built from the packaged sources (Cargo.toml exclude).
+      - name: Package the crate
+        run: cargo package --locked
 
   msrv:
     name: MSRV build (1.88)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Install MSRV toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: "1.88"
       - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: msrv
+          save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Build
         run: cargo build --locked --all-targets
       - name: Test
@@ -58,13 +141,16 @@ jobs:
   audit:
     name: Cargo audit
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
       issues: write
       checks: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Audit dependencies
-        uses: rustsec/audit-check@v2
+        uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}

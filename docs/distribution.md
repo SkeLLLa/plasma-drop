@@ -47,14 +47,15 @@ The packaged service points at `/usr/bin/plasma-drop` and expects the active use
 
 ### GitHub Pages repositories
 
-Release CI publishes unsigned package repositories at:
+Release CI publishes signed package repositories ([Linux signing](#linux-signing)) at:
 
 - `https://skellla.github.io/plasma-drop/rpm/x86_64`
 - `https://skellla.github.io/plasma-drop/deb`
 
 The RPM repository is generated with `createrepo_c --compatibility`. The APT repository uses a
 `stable` suite and `main` component generated from the published `.deb` packages. GitHub Releases
-remain the long-term artifact archive; Pages keeps a bounded recent package set.
+remain the long-term artifact archive; Pages keeps the 10 most recent releases. Every directory of
+the site has an `index.html` listing, since Pages serves none of its own.
 
 ### `cargo install`
 
@@ -86,18 +87,111 @@ The release flow should:
 7. It builds `deb` via `cargo-deb`.
 8. It builds `rpm` via `cargo-generate-rpm`.
 9. It verifies package contents before upload.
-10. It generates a combined `SHA256SUMS` file and one `.sha256` sidecar per artifact.
-11. It attaches the `tar.gz`, `deb`, `rpm`, `SHA256SUMS`, and per-artifact `.sha256` files to
+10. `sign-linux` signs the `rpm` with the Linux signing subkey, and `verify-linux` checks it
+    against `packaging/signing/repo.asc` and installs the packages in Fedora, Debian and Ubuntu.
+11. It generates a combined `SHA256SUMS` file, one `.sha256` sidecar per artifact, and build
+    provenance attestations.
+12. It attaches the `tar.gz`, `deb`, `rpm`, `SHA256SUMS`, and per-artifact `.sha256` files to
     the GitHub release.
-12. Once the tarball is attached, `jdx/packslip` signs a `packslip.sigstore.json` manifest
+13. Once the tarball is attached, `jdx/packslip` signs a `packslip.sigstore.json` manifest
     covering it (used by `packslip install` and the `mise` packslip backend), recording the
     commit the tag points to. The signing job has read-only access; a separate job uploads the
     bundle, and a third verifies it against the published tarball and the signer fingerprint in
     `README.md`.
-13. It builds and deploys RPM/APT repository metadata to GitHub Pages.
+14. `repo` builds the RPM/APT repositories and signs their metadata; `pages` deploys them to
+    GitHub Pages.
+
+Every action is pinned to a commit SHA and every container image to a digest listed in
+`packaging/ci/images.env`; `scripts/check-action-pins.sh` enforces it in CI and in the release's
+`pin-gate` job, and `zizmor` checks the workflows. Jobs get no permissions unless they ask for
+them. Only `master` saves the Rust cache in `ci.yml`, and `release.yml` uses none, so nothing a
+pull request builds reaches a release. Dependabot updates the action SHAs after a 7-day cooldown;
+the image digests in `images.env` are updated by hand.
 
 The release workflow uses the default `GITHUB_TOKEN` for repository operations. It does not depend
 on a PAT to trigger a second workflow.
+
+## Linux signing
+
+The .rpm files and the APT and DNF repository metadata are signed with an OpenPGP key: a
+committed pin, a key that lives only in a `master`-only environment, and a release that fails
+rather than ship unsigned or with another key once the pin exists. The key's primary part, which
+users trust, stays offline with a passphrase; CI holds only a signing subkey, without the
+primary's secret. The key is plasma-drop's own and signs no other project's packages.
+
+| Signed                                | Checked by                                                |
+| ------------------------------------- | --------------------------------------------------------- |
+| each .rpm (release page and DNF repo) | dnf (`gpgcheck=1`), `rpm -K`                              |
+| `rpm/x86_64/repodata/repomd.xml`      | dnf (`repo_gpgcheck=1`)                                   |
+| APT `InRelease` and `Release.gpg`     | apt (`signed-by`); `InRelease` lists every .deb's SHA-256 |
+
+The .deb files carry no signature of their own: APT never checks one (`dpkg-sig` and `debsigs`
+are off by default), so the signed `InRelease` is what covers them. A .deb downloaded from the
+release page is covered by the checksums and attestations instead.
+
+**Pin.** `packaging/signing/repo.asc` holds the public key (the primary, its subkeys and their
+revocations), armored, and only it. While it is absent, `sign-linux` passes the packages through
+unsigned and `repo` builds unsigned repositories, with a notice. Once it is committed,
+`packaging/ci/linux-signing.sh import` fails the release when the `REPO_SIGNING_KEY` secret is
+missing, belongs to another primary key, or can't sign (passphrase, expiry, or a subkey the pin
+revokes); setting the secret without committing the pin fails too. `import` also merges the pin
+into CI's keyring, so the published `plasma-drop.asc` is the committed certificate.
+`verify-linux` checks the .rpm against the pin before installing it, and `repo` checks every .rpm
+it publishes.
+
+**Where it signs.** `sign-linux` runs after `release`, in the Fedora 44 container with
+`rpm-sign`, and replaces the `release-linux-rpm` artifact with the signed file, so
+`verify-linux`, `checksums` and the release page see only that. No build runs in a job that holds
+the key. `repo` (in the Debian trixie container: the runner's rpm 4.18 can't read a pin with a
+revoked subkey) signs the metadata and also signs the .rpm files of the earlier releases it
+republishes. The release's own is already signed and stays byte-identical, while those from
+before the key, or signed by a since-revoked subkey, differ from their release page copies (and
+checksums) by the signature. `pages` only deploys the site, so the key and the Pages deploy token
+never share a job.
+
+**Secret.** The subkey lives only in the `linux-signing` GitHub environment, used by
+`sign-linux` and `repo`:
+
+| Secret             | Value                                                                         |
+| ------------------ | ----------------------------------------------------------------------------- |
+| `REPO_SIGNING_KEY` | one signing subkey, armored, without a passphrase (`linux-signing.sh ci-key`) |
+
+Settings → Environments → New environment `linux-signing`, deployment branches: only `master`
+(optionally required reviewers). Don't keep it as a repository secret.
+
+**Making the key.** On the maintainer's machine, not in CI, in a keyring kept for it (`gpg`
+asks for the passphrase). RSA 4096 is what every supported rpm, dnf and apt (sqv) accepts. The
+primary can only certify; the subkey can only sign:
+
+```sh
+export GNUPGHOME=~/.local/share/package-signing/gnupg   # any private directory
+install -d -m 700 "$GNUPGHOME"
+gpg --quick-gen-key 'plasma-drop packages <you@example.com>' rsa4096 cert never
+FPR=<the primary's fingerprint, from gpg -K>
+gpg --quick-add-key "$FPR" rsa4096 sign 3y
+SUB=<the new subkey's fingerprint, from gpg -K --with-subkey-fingerprints>
+gpg --armor --export "$FPR" > packaging/signing/repo.asc
+packaging/ci/linux-signing.sh ci-key "$SUB" | gh secret set REPO_SIGNING_KEY --env linux-signing
+```
+
+`ci-key` exports that one subkey with the primary's secret left out and the passphrase removed.
+Keep offline, apart from each other: the keyring (the primary's secret is passphrase-protected)
+and the revocation certificate gpg wrote to `$GNUPGHOME/openpgp-revocs.d/<fingerprint>.rev`,
+which revokes the whole key even if the keyring is lost. Commit `repo.asc` in the same change
+that updates the README's install commands to the signed ones (the index page shows them); the
+next release is the first signed one.
+
+**Rotating or revoking the subkey.** Users trust the primary, so a subkey change needs no action
+from them beyond the `plasma-drop.asc` they fetch. Before the subkey expires, or if the secret
+leaks: with the offline keyring, revoke the old subkey if it leaked (`gpg --edit-key "$FPR"`,
+`key N`, `revkey`, `save`), add a new one with `--quick-add-key`, export `repo.asc` again and set
+the secret from `ci-key` for the new one. Commit `repo.asc`: until then, `import` refuses a
+subkey the pin doesn't know, and once a revocation is committed it refuses the revoked one. Users
+then get the revocation with the next `plasma-drop.asc` they fetch; dnf refuses packages signed
+by the revoked subkey, and `repo` re-signs the earlier releases' with the new one. If the primary
+itself leaks, import the revocation certificate (remove the `:` before `-----BEGIN` first),
+commit the revoked `repo.asc` (every release fails from then on), and start over with a new key;
+users have to fetch it again.
 
 ## Crates.io Trusted Publishing
 
@@ -213,7 +307,9 @@ sudo dnf install plasma-drop
 ### APT repository
 
 ```bash
-echo 'deb [trusted=yes] https://skellla.github.io/plasma-drop/deb stable main' | sudo tee /etc/apt/sources.list.d/plasma-drop.list
+sudo install -d -m 0755 /etc/apt/keyrings
+sudo curl -fsSLo /etc/apt/keyrings/plasma-drop.asc https://skellla.github.io/plasma-drop/plasma-drop.asc
+echo 'deb [signed-by=/etc/apt/keyrings/plasma-drop.asc] https://skellla.github.io/plasma-drop/deb stable main' | sudo tee /etc/apt/sources.list.d/plasma-drop.list
 sudo apt update
 sudo apt install plasma-drop
 ```
