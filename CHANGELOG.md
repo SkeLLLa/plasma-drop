@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.13.0](https://github.com/SkeLLLa/plasma-drop/compare/v1.12.2...v1.13.0) - 2026-10-25
+
+### Added
+
+- *(ci)* repo signing
+
 ## [1.12.2](https://github.com/SkeLLLa/plasma-drop/compare/v1.12.1...v1.12.2) - 2026-10-23
 
 ### Other
