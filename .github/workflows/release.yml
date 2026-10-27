@@ -78,6 +78,12 @@ jobs:
           toolchain: stable
           components: clippy,rustfmt
 
+      # `make check` includes lint-deny; same version as ci.yml's deny job and .mise.toml.
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2.87.30
+        with:
+          tool: cargo-deny@0.20.2
+
       - name: Run quality checks
         run: make check
 

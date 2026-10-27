@@ -117,8 +117,9 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           save-if: ${{ github.ref == 'refs/heads/master' }}
+      # `make check` minus lint-deny, which the deny job runs with cargo-deny installed.
       - name: Run quality checks
-        run: make check
+        run: make fmt-check clippy test doc
       # What crates.io would get, built from the packaged sources (Cargo.toml exclude).
       - name: Package the crate
         run: cargo package --locked
