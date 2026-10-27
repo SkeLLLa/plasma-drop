@@ -5,8 +5,6 @@ use std::collections::HashSet;
 pub struct Hotkey {
     raw: String,
     sequence: String,
-    modifiers: Vec<String>,
-    key: String,
 }
 
 impl Hotkey {
@@ -16,16 +14,6 @@ impl Hotkey {
 
     pub fn sequence(&self) -> &str {
         &self.sequence
-    }
-
-    #[allow(dead_code)]
-    pub fn modifiers(&self) -> &[String] {
-        &self.modifiers
-    }
-
-    #[allow(dead_code)]
-    pub fn key(&self) -> &str {
-        &self.key
     }
 
     pub fn parse(input: &str) -> Result<Self> {
@@ -40,9 +28,13 @@ impl Hotkey {
             .filter(|token| !token.is_empty())
             .collect();
 
+        let Some((key, modifier_tokens)) = tokens.split_last() else {
+            bail!("hotkey '{raw}' has no key");
+        };
+
         let mut seen = HashSet::new();
         let mut modifiers = Vec::new();
-        for token in &tokens[..tokens.len() - 1] {
+        for token in modifier_tokens {
             let normalized = match token.to_ascii_lowercase().as_str() {
                 "ctrl" => "Ctrl",
                 "shift" => "Shift",
@@ -58,20 +50,11 @@ impl Hotkey {
             modifiers.push(normalized.to_string());
         }
 
-        let key = normalize_key(tokens[tokens.len() - 1], &raw)?;
-        let sequence = modifiers
-            .iter()
-            .cloned()
-            .chain(std::iter::once(key.clone()))
-            .collect::<Vec<_>>()
-            .join("+");
+        let key = normalize_key(key, &raw)?;
+        modifiers.push(key);
+        let sequence = modifiers.join("+");
 
-        Ok(Self {
-            raw,
-            sequence,
-            modifiers,
-            key,
-        })
+        Ok(Self { raw, sequence })
     }
 }
 
@@ -138,6 +121,12 @@ mod tests {
     #[test]
     fn rejects_empty() {
         assert!(Hotkey::parse("").is_err());
+    }
+
+    #[test]
+    fn rejects_separator_only_hotkey() {
+        assert!(Hotkey::parse("+").is_err());
+        assert!(Hotkey::parse(" + ").is_err());
     }
 
     #[test]

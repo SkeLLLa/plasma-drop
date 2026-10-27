@@ -8,32 +8,38 @@ fetch_remote_versions_cache = "4h"
 missing_tools = "always"
 
 [tools]
-node = "26.10.0"
+node = "26.12.1"
 rg = "15.2.0"
 fd = "10.5.0"
 jq = "1.8.2"
 yq = "4.54.1"
 shellcheck = "0.11.0"
 jactionlint = "2.3.0"
+# Dependency licenses/bans/sources/advisories (`lint-deny`).
+cargo-deny = "0.20.2"
+# Tests for scripts/check-action-pins.sh (`lint-actions`; CI installs it with mise-action).
+bats = "1.14.0"
 shfmt = "3.14.1"
-"github:jdx/packslip" = "1.6.0"
-rtk = { version = "0.51.0", postinstall = "rtk init -g --claude && rtk init -g --codex" }
-rust = { version = "1.99.0", components = "rust-analyzer,rust-src", mr_boxington = true }
-mr-boxington = "1.16.0"
-cargo-binstall = "1.25.1"
+"github:jdx/packslip" = "1.11.1"
+rtk = { version = "1.0.1", postinstall = "rtk init -g --claude && rtk init -g --codex" }
+rust = { version = "1.99.1", components = "rust-analyzer,rust-src", mr_boxington = true }
+mr-boxington = { version = "1.27.0", workflow = "release.yml@refs/heads/main" }
+cargo-binstall = "1.26.1"
 "cargo:cargo-deb" = "3.8.0"
-"cargo:cargo-generate-rpm" = "0.21.0"
+"cargo:cargo-generate-rpm" = "0.21.1"
 "github:dmtrKovalenko/fff.nvim"= { version = "0.11.0", exe = "fff-mcp", postinstall = """
 command -v claude >/dev/null && claude mcp remove fff -s user 2>/dev/null; command -v claude >/dev/null && claude mcp add -s user fff -- $MISE_TOOL_INSTALL_PATH/fff-mcp --log-level warn || true; command -v codex >/dev/null && codex mcp add fff -- $MISE_TOOL_INSTALL_PATH/fff-mcp --log-level warn || true
 """, platforms = { linux-x64 = { asset_pattern = "fff-mcp-x86_64-unknown-linux-musl" }, linux-arm64 = { asset_pattern = "fff-mcp-aarch64-unknown-linux-musl" }, macos-x64 = { asset_pattern = "fff-mcp-x86_64-apple-darwin" }, macos-arm64 = { asset_pattern = "fff-mcp-aarch64-apple-darwin" } } }
 
+# Tasks that compile run Cargo through mbx (mr-boxington): compiled crates are cached and shared
+# across checkouts. Plain `cargo` (and the Makefile) keeps working without it; CI uses plain Cargo.
 [tasks.build]
 description = "Build the Rust project"
-run = "cargo build"
+run = "mbx build"
 
 [tasks.build-release]
 description = "Build the optimized release binary"
-run = "cargo build --release --locked"
+run = "mbx build --release --locked"
 
 [tasks.fmt]
 description = "Format Rust sources"
@@ -45,7 +51,7 @@ run = "cargo fmt --all -- --check"
 
 [tasks.lint]
 description = "Run Clippy with warnings denied"
-run = "cargo clippy --all-targets --all-features -- -D warnings"
+run = "mbx clippy --all-targets --all-features -- -D warnings"
 
 [tasks.clippy]
 description = "Alias for lint"
@@ -53,11 +59,11 @@ depends = ["lint"]
 
 [tasks.test]
 description = "Run the test suite"
-run = "cargo test"
+run = "mbx test"
 
 [tasks.doc]
 description = "Build crate docs with warnings denied"
-run = 'RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --document-private-items'
+run = 'RUSTDOCFLAGS="-D warnings" mbx doc --no-deps --document-private-items'
 
 [tasks.lint-shell]
 description = "shellcheck the CI and packaging scripts"
@@ -67,6 +73,10 @@ run = "make lint-shell"
 description = "jactionlint (with shellcheck) and the action pin check on the GitHub workflows"
 run = "make lint-actions"
 
+[tasks.lint-deny]
+description = "cargo-deny: dependency licenses, bans, sources and advisories"
+run = "cargo deny --locked check"
+
 [tasks.check]
 description = "Run the full quality suite"
-depends = ["fmt-check", "lint", "test", "doc"]
+depends = ["fmt-check", "lint", "test", "doc", "lint-deny"]

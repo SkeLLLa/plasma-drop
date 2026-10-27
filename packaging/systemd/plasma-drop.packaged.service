@@ -8,6 +8,10 @@ Type=simple
 ExecStart=/usr/bin/plasma-drop --config %h/.config/plasma-drop/config.toml
 Restart=on-failure
 RestartSec=2
+# Back off from 2 s to 30 s on repeated failures instead of exhausting the start limit
+# (systemd 254+; older versions ignore these keys).
+RestartSteps=5
+RestartMaxDelaySec=30
 
 [Install]
 WantedBy=graphical-session.target

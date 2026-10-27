@@ -41,8 +41,16 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # mise 2026.10.14, pinned by checksum. mise.lock pins the tools (the action adds --locked).
+      - name: Install bats (version from .mise.toml)
+        uses: jdx/mise-action@9b200bcecbfd6303e69a4a261b2e09e3757440a7 # v5.2.0
+        with:
+          version: 2026.10.14
+          sha256: 50be7185bcf75929f01cc5630276bcb43ca367f7c5b176e2580903d28c611dc4
+          install_args: bats
+          cache: false
       - name: Test the pin checker
-        run: scripts/test-action-pins.sh
+        run: bats scripts/check-action-pins.bats
       - name: Check action pins
         run: scripts/check-action-pins.sh .github/workflows/*.yml
 
@@ -73,17 +81,18 @@ jobs:
         with:
           persist-credentials: false
       # mise 2026.10.14, pinned by checksum. mise.lock pins the tools (the action adds --locked).
-      - name: Install jactionlint, shellcheck (versions from .mise.toml)
+      - name: Install jactionlint, shellcheck, bats (versions from .mise.toml)
         uses: jdx/mise-action@9b200bcecbfd6303e69a4a261b2e09e3757440a7 # v5.2.0
         with:
           version: 2026.10.14
           sha256: 50be7185bcf75929f01cc5630276bcb43ca367f7c5b176e2580903d28c611dc4
-          install_args: jactionlint shellcheck
+          install_args: jactionlint shellcheck bats
           cache: false
       - name: Show tools
         run: |
           jactionlint --version
           shellcheck --version
+          bats --version
       - name: make lint-shell lint-actions
         run: make lint-shell lint-actions
 
@@ -115,7 +124,7 @@ jobs:
         run: cargo package --locked
 
   msrv:
-    name: MSRV build (1.88)
+    name: MSRV build (1.89)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -127,7 +136,7 @@ jobs:
       - name: Install MSRV toolchain
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
-          toolchain: "1.88"
+          toolchain: "1.89"
       - name: Cache cargo
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -154,3 +163,45 @@ jobs:
         uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+
+  # The release builds aarch64 on a native arm runner (release.yml, linux-assets); this keeps
+  # that build and the tests green on every change.
+  aarch64:
+    name: Build and test (aarch64)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+      - name: Build
+        run: cargo build --locked --all-targets
+      - name: Test
+        run: cargo test --locked
+
+  deny:
+    name: Cargo deny
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2.87.30
+        with:
+          tool: cargo-deny@0.20.2
+      - name: Check licenses, bans, sources and advisories
+        run: cargo deny --locked check

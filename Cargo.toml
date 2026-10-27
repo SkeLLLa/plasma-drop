@@ -2,7 +2,7 @@
 name = "plasma-drop"
 version = "1.13.2"
 edition = "2024"
-rust-version = "1.88"
+rust-version = "1.89"
 description = "KDE Plasma 6 dropdown app launcher"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/SkeLLLa/plasma-drop"
@@ -40,6 +40,7 @@ strip = "symbols"
 unsafe_op_in_unsafe_fn = "deny"
 unused_lifetimes = "deny"
 unused_qualifications = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
 
 [lints.clippy]
 all = { level = "warn", priority = -1 }
@@ -55,6 +56,24 @@ redundant_pub_crate = "allow"
 similar_names = "allow"
 struct_excessive_bools = "allow"
 too_many_lines = "allow"
+# Restriction lints (from https://github.com/morganlinton/BeautifulRust `lints/lints.toml`).
+# Panics: `expect("why")` instead of `unwrap()`; a fn returning `Result` doesn't also panic.
+unwrap_used = "warn"
+panic_in_result_fn = "warn"
+# Suppressions are `#[expect(.., reason = "..")]`, so they explain themselves and go stale loudly.
+allow_attributes = "warn"
+allow_attributes_without_reason = "warn"
+# Every `unsafe` block carries a `// SAFETY:` comment and does one thing.
+undocumented_unsafe_blocks = "warn"
+multiple_unsafe_ops_per_block = "warn"
+# `Arc::clone(&x)` so cheap clones are visible; `Arc<str>` over `Arc<String>`.
+clone_on_ref_ptr = "warn"
+rc_buffer = "warn"
+# `From`/`TryFrom` instead of silently lossy `as`.
+as_conversions = "warn"
+string_add = "warn"
+dbg_macro = "warn"
+todo = "warn"
 
 [dependencies]
 anyhow = "1.0"
@@ -68,7 +87,7 @@ tokio = { version = "1.52", features = [
   "fs",
   "macros",
   "process",
-  "rt-multi-thread",
+  "rt",
   "signal",
   "sync",
   "time",
@@ -76,8 +95,10 @@ tokio = { version = "1.52", features = [
 toml = "1.1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-uuid = { version = "1.23", features = ["serde", "v4"] }
-zbus = { version = "5.13", features = ["tokio"] }
+zbus = { version = "6.1", default-features = false, features = ["proxy", "service", "tokio"] }
+
+[dev-dependencies]
+tokio = { version = "1.52", features = ["test-util"] }
 
 [package.metadata.deb]
 maintainer = "SkeLLLa"

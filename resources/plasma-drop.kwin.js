@@ -73,12 +73,13 @@ bridge.getNextCommand = () => {
     );
 };
 
-bridge.onFocusChanged = () => {
+bridge.onFocusChanged = (window) => {
     callDBus(
         bridge.DBUS_SERVICE,
         bridge.DBUS_PATH,
         bridge.DBUS_INTERFACE,
-        "OnFocusChanged"
+        "OnFocusChanged",
+        window && window.internalId ? window.internalId.toString() : ""
     );
 };
 
@@ -97,9 +98,18 @@ bridge.sendResponse = (cmdInfo, params, exceptionMessage) => {
     );
 };
 
+const errorMessage = (error) => String(error && error.message ? error.message : error);
+
 bridge.onGotCommand = (cmdInfoStr) => {
-    const cmdInfo = JSON.parse(cmdInfoStr);
+    // Always re-arm the long poll, even when parsing or replying throws; otherwise the
+    // bridge stops for good and the daemon only notices through command timeouts.
+    let cmdInfo = null;
     try {
+        cmdInfo = JSON.parse(cmdInfoStr);
+        // The daemon answers an idle long poll with NOOP; it expects no response.
+        if (cmdInfo.type === "NOOP") {
+            return;
+        }
         const cmd = cmds[cmdInfo.type];
         if (typeof cmd !== "function") {
             throw new Error(`Unknown command '${cmdInfo.type}'`);
@@ -107,13 +117,19 @@ bridge.onGotCommand = (cmdInfoStr) => {
         const params = cmd(cmdInfo.params || {}) || {};
         bridge.sendResponse(cmdInfo, params, null);
     } catch (error) {
-        log.error(String(error && error.message ? error.message : error));
-        bridge.sendResponse(cmdInfo, {}, String(error && error.message ? error.message : error));
+        try {
+            log.error(errorMessage(error));
+            if (cmdInfo) {
+                bridge.sendResponse(cmdInfo, {}, errorMessage(error));
+            }
+        } catch (_) {
+            // Nothing left to report through; keep polling.
+        }
+    } finally {
+        bridge.getNextCommand();
     }
-    bridge.getNextCommand();
 };
 
-cmds["NOOP"] = () => ({});
 cmds["GET_WINDOW_LIST"] = () => ({
     windows: kwin.getWindows().map(mapWindow),
 });
@@ -139,39 +155,65 @@ cmds["GET_CURSOR_POSITION"] = () => ({
         return { x: position.x, y: position.y };
     })(),
 });
-cmds["GET_SUPPORT_INFORMATION"] = () => ({
-    text: workspace.supportInformation(),
+cmds["GET_SCREENS"] = () => ({
+    // Array.from also accepts the array-like list wrapper QJSEngine may hand out.
+    screens: Array.from(workspace.screens || [], (output) => ({
+        name: String(output.name || ""),
+        x: Math.round(output.geometry.x),
+        y: Math.round(output.geometry.y),
+        width: Math.round(output.geometry.width),
+        height: Math.round(output.geometry.height),
+    })),
 });
-cmds["MOVE_WINDOW"] = (params) => {
-    const window = kwin.getWindowByInternalIdRequired(params.internalId);
+
+// Move and resize stay separate frameGeometry assignments: see resizeTo.
+const moveTo = (window, x, y) => {
     const geometry = Object.assign({}, window.frameGeometry);
-    geometry.x = params.x;
-    geometry.y = params.y;
+    geometry.x = x;
+    geometry.y = y;
     window.frameGeometry = geometry;
-    return {};
 };
-cmds["RESIZE_WINDOW"] = (params) => {
-    const window = kwin.getWindowByInternalIdRequired(params.internalId);
+const resizeTo = (window, width, height) => {
     const geometry = Object.assign({}, window.frameGeometry);
     // KWin snaps logical sizes to the output's device pixels, so on fractional scales the
     // frame differs from the requested size by less than a pixel. Re-requesting that size
     // sends a configure whose late ack restores the position it was sent with, which leaves
     // the window stuck at an animation frame partway across screens.
-    if (Math.abs(geometry.width - params.width) < 1 && Math.abs(geometry.height - params.height) < 1) {
-        return {};
+    if (Math.abs(geometry.width - width) < 1 && Math.abs(geometry.height - height) < 1) {
+        return;
     }
-    geometry.width = params.width;
-    geometry.height = params.height;
+    geometry.width = width;
+    geometry.height = height;
     window.frameGeometry = geometry;
-    return {};
 };
-cmds["SET_WINDOW_OPACITY"] = (params) => {
-    const window = kwin.getWindowByInternalIdRequired(params.internalId);
-    const opacity = Math.max(0, Math.min(1, Number(params.opacity)));
+const setOpacity = (window, value) => {
+    const opacity = Math.max(0, Math.min(1, Number(value)));
     if (Number.isNaN(opacity)) {
-        throw new Error("SET_WINDOW_OPACITY requires a numeric opacity");
+        throw new Error("window opacity must be numeric");
     }
     window.opacity = opacity;
+};
+
+cmds["MOVE_WINDOW"] = (params) => {
+    moveTo(kwin.getWindowByInternalIdRequired(params.internalId), params.x, params.y);
+    return {};
+};
+cmds["RESIZE_WINDOW"] = (params) => {
+    resizeTo(kwin.getWindowByInternalIdRequired(params.internalId), params.width, params.height);
+    return {};
+};
+// One animation frame in one round trip: move, then resize, then opacity, each optional.
+cmds["SET_WINDOW_STATE"] = (params) => {
+    const window = kwin.getWindowByInternalIdRequired(params.internalId);
+    if (typeof params.x === "number" && typeof params.y === "number") {
+        moveTo(window, params.x, params.y);
+    }
+    if (typeof params.width === "number" && typeof params.height === "number") {
+        resizeTo(window, params.width, params.height);
+    }
+    if (params.opacity !== undefined && params.opacity !== null) {
+        setOpacity(window, params.opacity);
+    }
     return {};
 };
 cmds["SET_WINDOW_NO_BORDER"] = (params) => {

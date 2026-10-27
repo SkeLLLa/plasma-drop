@@ -2,7 +2,7 @@ use crate::config::AppConfig;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FrameGeometry {
     pub x: i32,
     pub y: i32,
@@ -10,7 +10,31 @@ pub struct FrameGeometry {
     pub height: i32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// One step of window state sent in a single bridge round trip: an optional move (and
+/// resize, when `resize` is set) followed by an optional opacity change.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WindowUpdate {
+    pub geometry: Option<FrameGeometry>,
+    /// Also apply `geometry`'s size, not only its position.
+    pub resize: bool,
+    pub opacity: Option<f64>,
+}
+
+/// Whether a window shows its title bar and border.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Decorations {
+    Shown,
+    Hidden,
+}
+
+/// Whether a window is minimized.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Minimized {
+    Yes,
+    No,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Point {
     pub x: i32,
     pub y: i32,

@@ -1,10 +1,17 @@
 use crate::hotkey::Hotkey;
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use regex::Regex;
 use serde::Deserialize;
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+
+/// `animation.duration_ms` when unset.
+const DEFAULT_ANIMATION_DURATION_MS: u16 = 150;
+/// `animation.frame_delay_ms` when unset: one frame at about 60 Hz.
+const DEFAULT_ANIMATION_FRAME_DELAY_MS: u16 = 16;
+/// Upper bound on `animation.duration_ms`; longer animations are rejected at load time.
+const MAX_ANIMATION_DURATION_MS: u16 = 2_000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AttachMode {
@@ -372,11 +379,15 @@ impl AnimationConfig {
         let easing = AnimationEasing::parse(app_name, raw.easing.as_deref().unwrap_or("ease-out"))?;
         let direction =
             AnimationDirection::parse(app_name, raw.direction.as_deref().unwrap_or("top"))?;
-        let duration_ms = raw.duration_ms.unwrap_or(150);
-        let frame_delay_ms = raw.frame_delay_ms.unwrap_or(16);
+        let duration_ms = raw.duration_ms.unwrap_or(DEFAULT_ANIMATION_DURATION_MS);
+        let frame_delay_ms = raw
+            .frame_delay_ms
+            .unwrap_or(DEFAULT_ANIMATION_FRAME_DELAY_MS);
 
-        if duration_ms > 2_000 {
-            bail!("app '{app_name}' has animation.duration_ms larger than 2000: '{duration_ms}'");
+        if duration_ms > MAX_ANIMATION_DURATION_MS {
+            bail!(
+                "app '{app_name}' has animation.duration_ms larger than {MAX_ANIMATION_DURATION_MS}: '{duration_ms}'"
+            );
         }
         if frame_delay_ms == 0 {
             bail!("app '{app_name}' has animation.frame_delay_ms that must be greater than 0");
@@ -411,8 +422,8 @@ impl Default for AnimationConfig {
             style: AnimationStyle::None,
             easing: AnimationEasing::EaseOut,
             direction: AnimationDirection::Top,
-            duration_ms: 150,
-            frame_delay_ms: 16,
+            duration_ms: DEFAULT_ANIMATION_DURATION_MS,
+            frame_delay_ms: DEFAULT_ANIMATION_FRAME_DELAY_MS,
         }
     }
 }
@@ -495,10 +506,10 @@ fn parse_metric(
         bail!("app '{app_name}' has invalid {field} metric '{raw}'");
     }
 
-    let (value, unit) = if let Some(value) = raw.strip_suffix('%') {
-        (value, "%")
+    let (value, is_percent) = if let Some(value) = raw.strip_suffix('%') {
+        (value, true)
     } else if let Some(value) = raw.strip_suffix("px") {
-        (value, "px")
+        (value, false)
     } else {
         bail!("app '{app_name}' has invalid {field} metric '{raw}'");
     };
@@ -515,21 +526,15 @@ fn parse_metric(
         bail!("app '{app_name}' has non-positive {field} metric '{raw}'");
     }
 
-    match unit {
-        "%" => {
-            if matches!(kind, MetricKind::Size) && number > 100 {
-                bail!("app '{app_name}' has {field} percentage larger than 100: '{raw}'");
-            }
-            if number < i32::from(i16::MIN) || number > i32::from(i16::MAX) {
-                bail!("app '{app_name}' has out-of-range {field} metric '{raw}'");
-            }
-            Ok(PlacementMetric::Percent(
-                i16::try_from(number).expect("validated metric should fit within i16"),
-            ))
-        }
-        "px" => Ok(PlacementMetric::Pixels(number)),
-        _ => unreachable!(),
+    if !is_percent {
+        return Ok(PlacementMetric::Pixels(number));
     }
+    if matches!(kind, MetricKind::Size) && number > 100 {
+        bail!("app '{app_name}' has {field} percentage larger than 100: '{raw}'");
+    }
+    let percent = i16::try_from(number)
+        .map_err(|_| anyhow!("app '{app_name}' has out-of-range {field} metric '{raw}'"))?;
+    Ok(PlacementMetric::Percent(percent))
 }
 
 fn parse_screen_name(app_name: &str, raw: Option<&str>) -> Result<Option<String>> {
@@ -550,8 +555,7 @@ mod tests {
     };
     use std::path::PathBuf;
 
-    #[allow(clippy::missing_const_for_fn)]
-    fn make_raw(apps: Vec<RawAppConfig>) -> RawConfig {
+    const fn make_raw(apps: Vec<RawAppConfig>) -> RawConfig {
         RawConfig {
             apps,
             log_level: None,

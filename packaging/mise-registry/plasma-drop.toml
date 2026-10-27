@@ -15,5 +15,5 @@ backends = [
   "github:SkeLLLa/plasma-drop", # fallback for pre-1.9.0 tags, which have no packslip manifest
 ]
 bins = ["plasma-drop"]
-os = ["linux"] # only a linux-x64 build is published today
+os = ["linux"] # linux-x64 and linux-arm64 builds are published
 test = { cmd = "plasma-drop --version", expected = "plasma-drop {{version}}" }

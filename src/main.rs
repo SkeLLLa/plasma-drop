@@ -9,7 +9,6 @@ pub mod configuration {}
 #[doc = include_str!("../docs/development.md")]
 pub mod development {}
 
-#[allow(clippy::doc_markdown)]
 mod animation;
 mod app_registry;
 mod cli;
@@ -20,30 +19,41 @@ mod screen;
 mod toggle;
 mod wm;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use app_registry::{AppRegistry, ManagedApp};
 use clap::Parser;
 use cli::{Cli, Command};
 use config::{Config, default_config_path};
-use screen::parse_support_information;
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 use toggle::ToggleService;
 use tokio::sync::Mutex;
+use tokio::task::JoinSet;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
-use wm::HOTKEY_PREFIX;
 use wm::kwin::client::KWinClient;
 use wm::kwin::script::ensure_script_file;
+use wm::{HOTKEY_PREFIX, WindowManager};
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
-    let cli = Cli::parse();
-    if let Some(command) = cli.command {
+    let mut cli = Cli::parse();
+    if let Some(command) = cli.command.take() {
         match command {
             Command::Init { systemd, force } => {
-                init_user_files(systemd, force)?;
+                init_user_files(
+                    if systemd {
+                        SystemdUnit::Install
+                    } else {
+                        SystemdUnit::Skip
+                    },
+                    if force {
+                        Overwrite::Replace
+                    } else {
+                        Overwrite::Refuse
+                    },
+                )?;
                 return Ok(());
             }
             Command::PrintExampleConfig => {
@@ -57,13 +67,15 @@ async fn main() -> Result<()> {
         }
     }
 
-    let config_path = cli.config.clone().unwrap_or(default_config_path()?);
+    let config_path = match cli.config.take() {
+        Some(path) => path,
+        None => default_config_path()?,
+    };
     let config = Config::load(&config_path)?;
     init_tracing(&cli, &config);
     info!("loaded config from {}", config_path.display());
 
     let (kwin, mut hotkey_rx, mut focus_rx) = KWinClient::connect().await?;
-    kwin.ensure_compatibility().await?;
 
     let script_path = ensure_script_file().await?;
     let script_plugin = kwin.load_script(&script_path).await?;
@@ -71,10 +83,10 @@ async fn main() -> Result<()> {
 
     kwin.cleanup_shortcuts().await?;
 
-    let screens = {
-        let text = kwin.support_information_text().await?;
-        parse_support_information(&text)?
-    };
+    let screens = kwin.screens().await?;
+    if screens.is_empty() {
+        bail!("KWin reported no screens");
+    }
     for screen in &screens {
         info!(
             "detected screen {} '{}' at {},{} {}x{}",
@@ -100,43 +112,85 @@ async fn main() -> Result<()> {
     let registry = Arc::new(Mutex::new(AppRegistry::new(managed_apps)));
 
     let kwin = Arc::new(kwin);
-    let toggle_service = ToggleService::new(registry.clone(), kwin.clone(), screens);
-    let result = loop {
+    let toggle_service = ToggleService::new(
+        Arc::clone(&registry),
+        Arc::<KWinClient>::clone(&kwin),
+        screens,
+    );
+    // Both futures live across loop iterations, so a SIGTERM or bridge loss that fires while
+    // a hotkey is being handled stays recorded.
+    let shutdown = shutdown_signal()?;
+    tokio::pin!(shutdown);
+    let bridge_loss = kwin.wait_for_bridge_loss();
+    tokio::pin!(bridge_loss);
+    // Waits for spawned apps' windows, so a slow app start does not stall the loop.
+    let mut launches = JoinSet::new();
+
+    // The second value says whether the script bridge was lost.
+    let (result, bridge_lost) = loop {
         tokio::select! {
             maybe_hotkey = hotkey_rx.recv() => {
                 match maybe_hotkey {
-                    Some(shortcut_id) => {
-                        if let Err(error) = toggle_service.handle_shortcut(&shortcut_id).await {
-                            warn!("hotkey '{}' failed: {error:#}", shortcut_id);
+                    Some((shortcut_id, pressed_at)) => {
+                        match toggle_service.handle_shortcut(&shortcut_id, pressed_at).await {
+                            Ok(Some(launch)) => {
+                                let service = toggle_service.clone();
+                                launches.spawn(async move { service.wait_for_launch(launch).await });
+                            }
+                            Ok(None) => {}
+                            Err(error) => warn!("hotkey '{}' failed: {error:#}", shortcut_id),
                         }
                     }
-                    None => break Ok(()),
+                    None => break (Ok(()), false),
                 }
             }
             maybe_focus = focus_rx.recv() => {
                 match maybe_focus {
-                    Some(()) => {
-                        if let Err(error) = toggle_service.handle_focus_change().await {
+                    Some(mut latest) => {
+                        // Only the newest activation of a burst matters; `handle_focus_change`
+                        // confirms anything but our own window with KWin.
+                        while let Ok(next) = focus_rx.try_recv() {
+                            latest = next;
+                        }
+                        if let Err(error) = toggle_service.handle_focus_change(latest).await {
                             warn!("failed to hide app after focus change: {error:#}");
                         }
                     }
-                    None => break Ok(()),
+                    None => break (Ok(()), false),
                 }
             }
-            signal = shutdown_signal() => {
+            Some(joined) = launches.join_next(), if !launches.is_empty() => {
+                match joined {
+                    Ok(launch) => {
+                        if let Err(error) = toggle_service.finish_launch(launch).await {
+                            warn!("failed to show started app: {error:#}");
+                        }
+                    }
+                    Err(error) => warn!("waiting for a started app's window failed: {error}"),
+                }
+            }
+            signal = &mut shutdown => {
                 match signal {
                     Ok(()) => {
                         info!("shutdown signal received");
-                        break Ok(());
+                        break (Ok(()), false);
                     }
-                    Err(error) => break Err(error),
+                    Err(error) => break (Err(error), false),
                 }
+            }
+            error = &mut bridge_loss => {
+                break (
+                    Err(error.context("lost the KWin script bridge; exiting so the service restarts")),
+                    true,
+                );
             }
         }
     };
 
-    if let Err(error) = toggle_service.restore_tracked_windows_on_shutdown().await {
-        warn!("failed to restore tracked windows on shutdown: {error:#}");
+    // Restoring goes through the script bridge; with the bridge gone each command would
+    // only wait out its timeout.
+    if !bridge_lost {
+        toggle_service.restore_tracked_windows_on_shutdown().await;
     }
     if let Err(error) = kwin.cleanup_shortcuts().await {
         warn!("failed to cleanup shortcuts: {error:#}");
@@ -171,29 +225,48 @@ fn build_registry_entries(config: &Config) -> Vec<ManagedApp> {
             tracked_window_id: None,
             restore_geometry: None,
             restore_no_border: None,
-            visible: false,
             shortcut_id: format!("{HOTKEY_PREFIX}{}_{}", app.sanitized_name(), idx + 1),
         })
         .collect()
 }
 
-fn init_user_files(with_systemd: bool, force: bool) -> Result<()> {
+/// Whether `init` also writes the user systemd unit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SystemdUnit {
+    Skip,
+    Install,
+}
+
+/// What `init` does with a file that already exists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Overwrite {
+    /// Fail, pointing at `--force`.
+    Refuse,
+    /// Overwrite it (`--force`).
+    Replace,
+}
+
+fn init_user_files(systemd: SystemdUnit, overwrite: Overwrite) -> Result<()> {
     let config_path = default_config_path()?;
     if let Some(parent) = config_path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("failed to create config directory '{}'", parent.display()))?;
     }
-    write_file(&config_path, embedded_assets::EXAMPLE_CONFIG, force)?;
+    write_file(&config_path, embedded_assets::EXAMPLE_CONFIG, overwrite)?;
     println!("wrote {}", config_path.display());
 
-    if with_systemd {
+    if systemd == SystemdUnit::Install {
         let service_path = default_systemd_service_path()?;
         if let Some(parent) = service_path.parent() {
             fs::create_dir_all(parent).with_context(|| {
                 format!("failed to create systemd directory '{}'", parent.display())
             })?;
         }
-        write_file(&service_path, embedded_assets::USER_SYSTEMD_SERVICE, force)?;
+        write_file(
+            &service_path,
+            embedded_assets::USER_SYSTEMD_SERVICE,
+            overwrite,
+        )?;
         println!("wrote {}", service_path.display());
     }
 
@@ -209,9 +282,9 @@ fn default_systemd_service_path() -> Result<std::path::PathBuf> {
         .join("plasma-drop.service"))
 }
 
-fn write_file(path: &Path, contents: &str, force: bool) -> Result<()> {
-    if path.exists() && !force {
-        anyhow::bail!(
+fn write_file(path: &Path, contents: &str, overwrite: Overwrite) -> Result<()> {
+    if overwrite == Overwrite::Refuse && path.exists() {
+        bail!(
             "'{}' already exists; rerun with --force to overwrite",
             path.display()
         );
@@ -219,24 +292,25 @@ fn write_file(path: &Path, contents: &str, force: bool) -> Result<()> {
     fs::write(path, contents).with_context(|| format!("failed to write '{}'", path.display()))
 }
 
-async fn shutdown_signal() -> Result<()> {
-    let ctrl_c = tokio::signal::ctrl_c();
+/// Installs the shutdown signal handlers now and returns a future that resolves on
+/// Ctrl+C or SIGTERM. Installing eagerly means a signal that arrives while the returned
+/// future is not being polled is still observed on the next poll.
+fn shutdown_signal() -> Result<impl Future<Output = Result<()>>> {
     #[cfg(unix)]
-    let terminate = async {
-        let mut signal = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .context("failed to install SIGTERM handler")?;
-        signal.recv().await;
-        Result::<()>::Ok(())
-    };
+    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        .context("failed to install SIGTERM handler")?;
 
-    #[cfg(not(unix))]
-    let terminate = std::future::pending::<Result<()>>();
+    Ok(async move {
+        #[cfg(unix)]
+        let terminate = sigterm.recv();
+        #[cfg(not(unix))]
+        let terminate = std::future::pending::<Option<()>>();
 
-    tokio::select! {
-        result = ctrl_c => {
-            result.context("failed while waiting for Ctrl+C")?;
-            Ok(())
+        tokio::select! {
+            result = tokio::signal::ctrl_c() => {
+                result.context("failed while waiting for Ctrl+C")
+            }
+            _ = terminate => Ok(()),
         }
-        result = terminate => result,
-    }
+    })
 }

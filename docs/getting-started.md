@@ -42,7 +42,7 @@ Use `plasma-drop init` if you do not want a `systemd --user` unit created.
 After extracting the release tarball:
 
 ```bash
-cd plasma-drop-<version>-x86_64-unknown-linux-gnu
+cd plasma-drop-<version>-<arch>-unknown-linux-gnu   # <arch>: x86_64 or aarch64
 ./install-user.sh
 ```
 

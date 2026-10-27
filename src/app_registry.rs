@@ -1,6 +1,6 @@
 use crate::config::AppConfig;
 use crate::wm::FrameGeometry;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone)]
 pub struct ManagedApp {
@@ -8,7 +8,6 @@ pub struct ManagedApp {
     pub tracked_window_id: Option<String>,
     pub restore_geometry: Option<FrameGeometry>,
     pub restore_no_border: Option<bool>,
-    pub visible: bool,
     pub shortcut_id: String,
 }
 
@@ -17,6 +16,8 @@ pub struct AppRegistry {
     apps: HashMap<String, ManagedApp>,
     shortcuts: HashMap<String, String>,
     visible_app: Option<String>,
+    /// Apps whose command was spawned and whose window has not appeared yet.
+    launching: HashSet<String>,
 }
 
 impl AppRegistry {
@@ -32,6 +33,7 @@ impl AppRegistry {
             apps: app_map,
             shortcuts: shortcut_map,
             visible_app: None,
+            launching: HashSet::new(),
         }
     }
 
@@ -55,15 +57,44 @@ impl AppRegistry {
         self.visible_app.as_deref()
     }
 
-    pub fn set_visible(&mut self, name: &str, visible: bool) {
+    /// Records `window_id` as the window tracked for `name`.
+    pub fn record_window(&mut self, name: &str, window_id: String) {
         if let Some(app) = self.apps.get_mut(name) {
-            app.visible = visible;
+            app.tracked_window_id = Some(window_id);
         }
-        if visible {
-            self.visible_app = Some(name.to_string());
-        } else if self.visible_app.as_deref() == Some(name) {
+    }
+
+    /// Forgets the window tracked for `name`, e.g. after it was closed outside plasma-drop.
+    pub fn forget_window(&mut self, name: &str) {
+        if let Some(app) = self.apps.get_mut(name) {
+            app.tracked_window_id = None;
+        }
+    }
+
+    /// Marks `name` shown; it becomes the currently visible app.
+    pub fn mark_visible(&mut self, name: &str) {
+        self.visible_app = Some(name.to_string());
+    }
+
+    /// Marks `name` hidden, clearing the currently visible app only if it was `name`.
+    pub fn mark_hidden(&mut self, name: &str) {
+        if self.visible_app.as_deref() == Some(name) {
             self.visible_app = None;
         }
+    }
+
+    /// Records that `name` was spawned and its window is awaited.
+    pub fn mark_launching(&mut self, name: &str) {
+        self.launching.insert(name.to_string());
+    }
+
+    /// Records that waiting for `name`'s window ended, whether or not one appeared.
+    pub fn mark_launched(&mut self, name: &str) {
+        self.launching.remove(name);
+    }
+
+    pub fn is_launching(&self, name: &str) -> bool {
+        self.launching.contains(name)
     }
 }
 
@@ -94,7 +125,6 @@ mod tests {
             tracked_window_id: None,
             restore_geometry: None,
             restore_no_border: None,
-            visible: false,
             shortcut_id: shortcut_id.into(),
         }
     }
@@ -145,33 +175,31 @@ mod tests {
     }
 
     #[test]
-    fn set_visible_true_marks_the_app_and_becomes_the_visible_one() {
+    fn mark_visible_marks_the_app_and_becomes_the_visible_one() {
         let mut registry = registry();
-        registry.set_visible("kitty", true);
+        registry.mark_visible("kitty");
 
-        assert!(registry.managed_app("kitty").unwrap().visible);
         assert_eq!(registry.currently_visible_name(), Some("kitty"));
     }
 
     #[test]
-    fn set_visible_false_clears_the_visible_app_when_it_matches() {
+    fn mark_hidden_clears_the_visible_app_when_it_matches() {
         let mut registry = registry();
-        registry.set_visible("kitty", true);
-        registry.set_visible("kitty", false);
+        registry.mark_visible("kitty");
+        registry.mark_hidden("kitty");
 
-        assert!(!registry.managed_app("kitty").unwrap().visible);
         assert_eq!(registry.currently_visible_name(), None);
     }
 
     #[test]
     fn hiding_an_app_that_is_not_the_visible_one_does_not_clear_the_tracked_app() {
-        // Regression guard: `set_visible(x, false)` must only clear
+        // Regression guard: `mark_hidden(x)` must only clear
         // `currently_visible_name()` when `x` is the app it currently points
         // to, otherwise a stray hide of a background app would drop the
         // pointer to the app that is actually still shown.
         let mut registry = registry();
-        registry.set_visible("kitty", true);
-        registry.set_visible("dolphin", false);
+        registry.mark_visible("kitty");
+        registry.mark_hidden("dolphin");
 
         assert_eq!(registry.currently_visible_name(), Some("kitty"));
     }

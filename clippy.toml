@@ -1,1 +1,6 @@
-msrv = "1.88"
+msrv = "1.89"
+# Any `bool` parameter is flagged (not just 3+): use a two-variant enum, or `#[expect]` with a
+# reason on a private helper whose callers sit next to it.
+max-fn-params-bools = 0
+# A panic is the assertion in tests.
+allow-unwrap-in-tests = true

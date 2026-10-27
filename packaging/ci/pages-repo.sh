@@ -6,8 +6,8 @@
 #
 # Usage:
 #   packaging/ci/pages-repo.sh ASSETS OUT BASE_URL VERSION
-#       ASSETS    plasma-drop_*_amd64.deb and plasma-drop-*-1.x86_64.rpm files; those of
-#                 VERSION must be among them
+#       ASSETS    plasma-drop_*_{amd64,arm64}.deb and plasma-drop-*-1.{x86_64,aarch64}.rpm
+#                 files; those of VERSION must be among them
 #       OUT       the site directory to create (must not exist)
 #       BASE_URL  where OUT is served, e.g. https://skellla.github.io/plasma-drop
 #
@@ -56,7 +56,8 @@ if [ -n "$key" ]; then
     done
 fi
 
-for f in "plasma-drop_${version}_amd64.deb" "plasma-drop-${version}-1.x86_64.rpm"; do
+for f in "plasma-drop_${version}_amd64.deb" "plasma-drop_${version}_arm64.deb" \
+    "plasma-drop-${version}-1.x86_64.rpm" "plasma-drop-${version}-1.aarch64.rpm"; do
     [ -f "$assets/$f" ] || die "$assets/$f is missing"
 done
 
@@ -66,21 +67,23 @@ mkdir -p "$out"
 # --- APT: one suite, stable, with the main component ---------------------------------------
 deb="$out/deb"
 mkdir -p "$deb/pool/main/p/plasma-drop"
-cp "$assets"/plasma-drop_*_amd64.deb "$deb/pool/main/p/plasma-drop/"
+cp "$assets"/plasma-drop_*_amd64.deb "$assets"/plasma-drop_*_arm64.deb "$deb/pool/main/p/plasma-drop/"
 (
     cd "$deb"
-    dir="dists/stable/main/binary-amd64"
-    mkdir -p "$dir"
-    apt-ftparchive --arch amd64 packages pool > "$dir/Packages"
-    # cargo-deb adds the Debian revision: 1.2.3-1.
-    grep -Eq "^Version: $version(-[0-9]+)?\$" "$dir/Packages" || die "no $version package in $dir/Packages"
-    gzip -9n < "$dir/Packages" > "$dir/Packages.gz"
+    for arch in amd64 arm64; do
+        dir="dists/stable/main/binary-$arch"
+        mkdir -p "$dir"
+        apt-ftparchive --arch "$arch" packages pool > "$dir/Packages"
+        # cargo-deb adds the Debian revision: 1.2.3-1.
+        grep -Eq "^Version: $version(-[0-9]+)?\$" "$dir/Packages" || die "no $version package in $dir/Packages"
+        gzip -9n < "$dir/Packages" > "$dir/Packages.gz"
+    done
     apt-ftparchive \
         -o APT::FTPArchive::Release::Origin=plasma-drop \
         -o APT::FTPArchive::Release::Label=plasma-drop \
         -o APT::FTPArchive::Release::Suite=stable \
         -o APT::FTPArchive::Release::Codename=stable \
-        -o APT::FTPArchive::Release::Architectures=amd64 \
+        -o APT::FTPArchive::Release::Architectures="amd64 arm64" \
         -o APT::FTPArchive::Release::Components=main \
         -o APT::FTPArchive::Release::Description="plasma-drop APT repository" \
         release dists/stable > Release.tmp
@@ -97,26 +100,27 @@ else
 fi
 echo "$deb_line" > "$deb/plasma-drop.list"
 
-# --- DNF: one repository per architecture, rpm/$basearch; only x86_64 is built ---------------
-arch=x86_64
-dir="$out/rpm/$arch"
-mkdir -p "$dir"
-cp "$assets"/plasma-drop-*-1."$arch".rpm "$dir/"
-if [ -n "$key" ]; then
-    # __gpg: Debian's rpm looks for gpg2. An identical signature is left as it is.
-    rpmsign --define "__gpg $(command -v gpg)" --define "_gpg_name $key" \
-        --define "_gpg_sign_cmd_extra_args --batch --pinentry-mode loopback" \
-        --addsign "$dir"/*.rpm > /dev/null
-    db="$(mktemp -d)"
-    rpmkeys --dbpath "$db" --import "$out/plasma-drop.asc"
-    for f in "$dir"/*.rpm; do
-        rpmkeys --dbpath "$db" --define '_pkgverify_level signature' --checksig "$f" > /dev/null ||
-            die "$f did not verify after signing"
-    done
-    rm -rf "$db"
-fi
-createrepo_c --quiet --compatibility "$dir"
-[ -z "$key" ] || sign --armor --detach-sign --output "$dir/repodata/repomd.xml.asc" "$dir/repodata/repomd.xml"
+# --- DNF: one repository per architecture, rpm/$basearch -----------------------------------
+for arch in x86_64 aarch64; do
+    dir="$out/rpm/$arch"
+    mkdir -p "$dir"
+    cp "$assets"/plasma-drop-*-1."$arch".rpm "$dir/"
+    if [ -n "$key" ]; then
+        # __gpg: Debian's rpm looks for gpg2. An identical signature is left as it is.
+        rpmsign --define "__gpg $(command -v gpg)" --define "_gpg_name $key" \
+            --define "_gpg_sign_cmd_extra_args --batch --pinentry-mode loopback" \
+            --addsign "$dir"/*.rpm > /dev/null
+        db="$(mktemp -d)"
+        rpmkeys --dbpath "$db" --import "$out/plasma-drop.asc"
+        for f in "$dir"/*.rpm; do
+            rpmkeys --dbpath "$db" --define '_pkgverify_level signature' --checksig "$f" > /dev/null ||
+                die "$f did not verify after signing"
+        done
+        rm -rf "$db"
+    fi
+    createrepo_c --quiet --compatibility "$dir"
+    [ -z "$key" ] || sign --armor --detach-sign --output "$dir/repodata/repomd.xml.asc" "$dir/repodata/repomd.xml"
+done
 if [ -n "$key" ]; then
     rpm_check="gpgcheck=1
 repo_gpgcheck=1

@@ -38,7 +38,7 @@ Swift port of `plasma-drop` and reads the same config file.
 ## Install
 
 You need KDE Plasma 6 on Wayland, with a session D-Bus and KWin scripting. `plasma-drop` doesn't
-support X11 or other compositors. Packages exist for x86_64 only.
+support X11 or other compositors. Packages and tarballs exist for x86_64 and aarch64.
 
 | Distribution | How to install |
 | --- | --- |
@@ -83,8 +83,8 @@ You get no automatic updates with this method. Download the file from the
 [latest release](https://github.com/SkeLLLa/plasma-drop/releases/latest), then run:
 
 ```sh
-sudo apt install ./plasma-drop_<version>_amd64.deb      # Debian, Ubuntu
-sudo dnf install ./plasma-drop-<version>-1.x86_64.rpm   # Fedora
+sudo apt install ./plasma-drop_<version>_amd64.deb      # Debian, Ubuntu (arm64.deb on aarch64)
+sudo dnf install ./plasma-drop-<version>-1.x86_64.rpm   # Fedora (aarch64.rpm on aarch64)
 ```
 
 Packages install `/usr/bin/plasma-drop`, the user service
@@ -97,8 +97,8 @@ This method installs for your user only, into `~/.local`, and doesn't need root.
 the starter config and installs the user service:
 
 ```sh
-tar -xzf plasma-drop-<version>-x86_64-unknown-linux-gnu.tar.gz
-cd plasma-drop-<version>-x86_64-unknown-linux-gnu
+tar -xzf plasma-drop-<version>-<arch>-unknown-linux-gnu.tar.gz   # <arch>: x86_64 or aarch64
+cd plasma-drop-<version>-<arch>-unknown-linux-gnu
 ./install-user.sh
 ```
 

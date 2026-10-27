@@ -17,7 +17,9 @@ Visual assets live under:
 
 The repo exposes local project scripts through both `make` and `mise`. Use `make` when you already
 have the Rust toolchain installed, or `mise` when you want the pinned toolchain and helper tools
-from `.mise.toml`.
+from `.mise.toml`. The `mise` tasks that compile run Cargo through `mbx`
+([Mr Boxington](https://mr-boxington.jdx.dev)), which caches compiled crates across
+checkouts; `make` and CI use plain Cargo.
 
 Install pinned tools before running `mise` tasks:
 
@@ -35,6 +37,9 @@ Common scripts:
 | Lint | `make lint` or `make clippy` | `mise run lint` or `mise run clippy` |
 | Test | `make test` | `mise run test` |
 | Docs | `make doc` | `mise run doc` |
+| Dependency audit | `make lint-deny` | `mise run lint-deny` |
+| Shell lint | `make lint-shell` | `mise run lint-shell` |
+| Workflow lint and action pins (needs `jactionlint`, `bats`) | `make lint-actions` | `mise run lint-actions` |
 | Full check | `make check` | `mise run check` |
 
 The full local verification entry point is:
@@ -50,6 +55,15 @@ Both commands run:
 - `cargo clippy --all-targets --all-features -- -D warnings`
 - `cargo test`
 - `cargo doc --no-deps --document-private-items`
+- `cargo deny --locked check` (licenses, bans, sources and security advisories, configured in
+  `deny.toml`; fetches the advisory database)
+
+Lints are configured in `Cargo.toml` (`[lints]`) and `clippy.toml`. Beyond clippy's
+`pedantic` and `nursery` groups they include restriction lints from
+[BeautifulRust](https://github.com/morganlinton/BeautifulRust): no `unwrap()` outside tests
+(use `expect("why")`), `#[expect(lint, reason = "...")]` instead of `#[allow]`, a
+`// SAFETY:` comment on every `unsafe` block, `Arc::clone(&x)`, no lossy `as` casts, and no
+`bool` function parameters (use a two-variant enum).
 
 ## Editor Integration
 

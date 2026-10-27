@@ -16,7 +16,8 @@ embedded so `cargo install` users can print them from the binary.
 
 ### Binary archive
 
-The release archive is intended for user-local installation and contains:
+The release archive (`x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu`) is intended for
+user-local installation and contains:
 
 - `bin/plasma-drop`
 - `share/systemd/user/plasma-drop.service`
@@ -33,7 +34,8 @@ reloads the user systemd daemon when available.
 
 ### `deb` / `rpm`
 
-Native packages install:
+Native packages are built for `x86_64` (`amd64.deb`, `x86_64.rpm`) and `aarch64` (`arm64.deb`,
+`aarch64.rpm`) and install:
 
 - `/usr/bin/plasma-drop`
 - `/usr/lib/systemd/user/plasma-drop.service`
@@ -49,7 +51,7 @@ The packaged service points at `/usr/bin/plasma-drop` and expects the active use
 
 Release CI publishes signed package repositories ([Linux signing](#linux-signing)) at:
 
-- `https://skellla.github.io/plasma-drop/rpm/x86_64`
+- `https://skellla.github.io/plasma-drop/rpm/x86_64` and `.../rpm/aarch64`
 - `https://skellla.github.io/plasma-drop/deb`
 
 The RPM repository is generated with `createrepo_c --compatibility`. The APT repository uses a
@@ -82,22 +84,26 @@ The release flow should:
 2. `release-plz update` edits the next version and `CHANGELOG.md` changes in the workflow checkout.
 3. The workflow commits that release bump directly back to `master`.
 4. `release-plz release` creates the tag, publishes to crates.io, and creates the GitHub release.
-5. The same workflow builds the optimized binary once.
+5. The read-only `linux-assets` job checks out the tag and runs once per architecture
+   (`x86_64` and `aarch64`), each on a native runner (`ubuntu-24.04`, `ubuntu-24.04-arm`). It
+   builds the optimized binary.
 6. It assembles the binary tarball with the install helper and runtime assets.
 7. It builds `deb` via `cargo-deb`.
 8. It builds `rpm` via `cargo-generate-rpm`.
-9. It verifies package contents before upload.
-10. `sign-linux` signs the `rpm` with the Linux signing subkey, and `verify-linux` checks it
-    against `packaging/signing/repo.asc` and installs the packages in Fedora, Debian and Ubuntu.
+9. It verifies package contents and architectures before upload. The tarball, `.deb` and `.rpm`
+   of each architecture are separate artifacts (`release-linux-{tar,deb,rpm}-<arch>`).
+10. `sign-linux` signs both `rpm` files with the Linux signing subkey, and `verify-linux` checks
+    them against `packaging/signing/repo.asc` and installs the packages in Fedora 44, Debian
+    trixie and Ubuntu 26.04 (`x86_64`), and Fedora 44 and Debian trixie (`aarch64`).
 11. It generates a combined `SHA256SUMS` file, one `.sha256` sidecar per artifact, and build
     provenance attestations.
-12. It attaches the `tar.gz`, `deb`, `rpm`, `SHA256SUMS`, and per-artifact `.sha256` files to
-    the GitHub release.
-13. Once the tarball is attached, `jdx/packslip` signs a `packslip.sigstore.json` manifest
-    covering it (used by `packslip install` and the `mise` packslip backend), recording the
-    commit the tag points to. The signing job has read-only access; a separate job uploads the
-    bundle, and a third verifies it against the published tarball and the signer fingerprint in
-    `README.md`.
+12. It attaches the `tar.gz`, `deb`, `rpm` files of both architectures, `SHA256SUMS`, and
+    per-artifact `.sha256` files to the GitHub release.
+13. Once the tarballs are attached, `jdx/packslip` signs a `packslip.sigstore.json` manifest
+    covering both, one `linux/<arch>` entry each (used by `packslip install` and the `mise`
+    packslip backend), recording the commit the tag points to. The signing job has read-only
+    access; a separate job uploads the bundle, and a third verifies it against the published
+    tarballs and the signer fingerprint in `README.md`.
 14. `repo` builds the RPM/APT repositories and signs their metadata; `pages` deploys them to
     GitHub Pages.
 
@@ -122,7 +128,7 @@ primary's secret. The key is plasma-drop's own and signs no other project's pack
 | Signed                                | Checked by                                                |
 | ------------------------------------- | --------------------------------------------------------- |
 | each .rpm (release page and DNF repo) | dnf (`gpgcheck=1`), `rpm -K`                              |
-| `rpm/x86_64/repodata/repomd.xml`      | dnf (`repo_gpgcheck=1`)                                   |
+| `rpm/<arch>/repodata/repomd.xml`      | dnf (`repo_gpgcheck=1`)                                   |
 | APT `InRelease` and `Release.gpg`     | apt (`signed-by`); `InRelease` lists every .deb's SHA-256 |
 
 The .deb files carry no signature of their own: APT never checks one (`dpkg-sig` and `debsigs`
@@ -136,11 +142,11 @@ unsigned and `repo` builds unsigned repositories, with a notice. Once it is comm
 missing, belongs to another primary key, or can't sign (passphrase, expiry, or a subkey the pin
 revokes); setting the secret without committing the pin fails too. `import` also merges the pin
 into CI's keyring, so the published `plasma-drop.asc` is the committed certificate.
-`verify-linux` checks the .rpm against the pin before installing it, and `repo` checks every .rpm
+`verify-linux` checks each .rpm against the pin before installing it, and `repo` checks every .rpm
 it publishes.
 
-**Where it signs.** `sign-linux` runs after `release`, in the Fedora 44 container with
-`rpm-sign`, and replaces the `release-linux-rpm` artifact with the signed file, so
+**Where it signs.** `sign-linux` runs after `linux-assets`, in the Fedora 44 container with
+`rpm-sign`, and replaces each `release-linux-rpm-<arch>` artifact with the signed file, so
 `verify-linux`, `checksums` and the release page see only that. No build runs in a job that holds
 the key. `repo` (in the Debian trixie container: the runner's rpm 4.18 can't read a pin with a
 revoked subkey) signs the metadata and also signs the .rpm files of the earlier releases it
@@ -251,8 +257,8 @@ systemctl --user enable --now plasma-drop.service
 Example:
 
 ```bash
-tar -xzf plasma-drop-<version>-x86_64-unknown-linux-gnu.tar.gz
-cd plasma-drop-<version>-x86_64-unknown-linux-gnu
+tar -xzf plasma-drop-<version>-<arch>-unknown-linux-gnu.tar.gz
+cd plasma-drop-<version>-<arch>-unknown-linux-gnu
 ./install-user.sh
 ```
 
@@ -260,7 +266,7 @@ To verify a downloaded artifact before installing it, download the matching `.sh
 run:
 
 ```bash
-sha256sum -c plasma-drop-<version>-x86_64-unknown-linux-gnu.tar.gz.sha256
+sha256sum -c plasma-drop-<version>-<arch>-unknown-linux-gnu.tar.gz.sha256
 ```
 
 The release also includes `SHA256SUMS` for checking all downloaded artifacts at once.
@@ -275,11 +281,11 @@ The release also includes `SHA256SUMS` for checking all downloaded artifacts at 
 Examples:
 
 ```bash
-sudo dpkg -i plasma-drop_<version>_amd64.deb
+sudo dpkg -i plasma-drop_<version>_amd64.deb   # arm64.deb on aarch64
 ```
 
 ```bash
-sudo rpm -i plasma-drop-<version>-1.x86_64.rpm
+sudo rpm -i plasma-drop-<version>-1.x86_64.rpm # aarch64.rpm on aarch64
 ```
 
 Then:

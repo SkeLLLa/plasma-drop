@@ -189,9 +189,9 @@ done
 awk_status=0
 awk -v warnmode="${warn}" -v prehard="${prehard}" -f "${prog}" "$@" /dev/null || awk_status=$?
 
-# Every pinned container image must be one of packaging/ci/images.env, so CI and the local
-# `mise run linux:container:*` tasks run the same bits.
-images="$(dirname "$0")/../packaging/ci/images.env"
+# Every pinned container image must be one of packaging/ci/images.env (IMAGES overrides the
+# path, for the tests), so CI and the local `mise run linux:container:*` tasks run the same bits.
+images="${IMAGES:-$(dirname "$0")/../packaging/ci/images.env}"
 if [ -f "${images}" ] && [ "${awk_status}" -eq 0 ]; then
     known="$(sed -n 's/^[A-Z_]*_IMAGE=//p' "${images}")"
     for f in "$@"; do

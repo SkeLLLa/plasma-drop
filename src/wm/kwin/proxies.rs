@@ -1,16 +1,6 @@
 use zbus::proxy;
 
 #[proxy(
-    interface = "org.kde.KWin",
-    default_service = "org.kde.KWin",
-    default_path = "/KWin"
-)]
-pub trait KWin {
-    #[zbus(name = "supportInformation")]
-    fn support_information(&self) -> zbus::Result<String>;
-}
-
-#[proxy(
     interface = "org.kde.kwin.Scripting",
     default_service = "org.kde.KWin",
     default_path = "/Scripting"

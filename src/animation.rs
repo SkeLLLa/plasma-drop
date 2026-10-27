@@ -2,7 +2,7 @@ use crate::config::{AnimationConfig, AnimationEasing, AnimationStyle};
 use crate::wm::FrameGeometry;
 use std::time::Duration;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WindowState {
     pub geometry: Option<FrameGeometry>,
     pub opacity: Option<f64>,
@@ -60,13 +60,13 @@ impl TransitionPlan {
         match phase {
             TransitionPhase::Show => {
                 if uses_geometry_track(config.style) {
-                    setup.geometry = Some(hidden.clone());
+                    setup.geometry = Some(*hidden);
                     keyframes.push(KeyframeTrack::Geometry {
-                        from: hidden.clone(),
-                        to: visible.clone(),
+                        from: *hidden,
+                        to: *visible,
                     });
                 } else {
-                    setup.geometry = Some(visible.clone());
+                    setup.geometry = Some(*visible);
                 }
 
                 if uses_opacity_track(config.style) {
@@ -75,12 +75,12 @@ impl TransitionPlan {
                 }
             }
             TransitionPhase::Hide => {
-                setup.geometry = Some(visible.clone());
+                setup.geometry = Some(*visible);
 
                 if uses_geometry_track(config.style) {
                     keyframes.push(KeyframeTrack::Geometry {
-                        from: visible.clone(),
-                        to: hidden.clone(),
+                        from: *visible,
+                        to: *hidden,
                     });
                 }
 
@@ -91,7 +91,7 @@ impl TransitionPlan {
                 }
 
                 if !uses_geometry_track(config.style) {
-                    teardown.geometry = Some(hidden.clone());
+                    teardown.geometry = Some(*hidden);
                 }
             }
         }
@@ -106,12 +106,12 @@ impl TransitionPlan {
         })
     }
 
-    pub fn setup_state(&self) -> WindowState {
-        self.setup.clone()
+    pub const fn setup_state(&self) -> WindowState {
+        self.setup
     }
 
-    pub fn teardown_state(&self) -> WindowState {
-        self.teardown.clone()
+    pub const fn teardown_state(&self) -> WindowState {
+        self.teardown
     }
 
     pub fn frame_count(&self) -> u16 {
@@ -143,10 +143,6 @@ impl TransitionPlan {
 
         state
     }
-
-    pub fn final_state(&self) -> WindowState {
-        self.frame_state(self.frame_count())
-    }
 }
 
 const fn uses_geometry_track(style: AnimationStyle) -> bool {
@@ -166,9 +162,13 @@ fn interpolate_geometry(from: &FrameGeometry, to: &FrameGeometry, progress: f64)
     }
 }
 
-#[allow(clippy::cast_possible_truncation)]
+#[expect(
+    clippy::as_conversions,
+    clippy::cast_possible_truncation,
+    reason = "the result lies between two i32 endpoints, so the rounded f64 always fits"
+)]
 fn interpolate_i32(from: i32, to: i32, progress: f64) -> i32 {
-    let delta = f64::from(to - from);
+    let delta = f64::from(to) - f64::from(from);
     delta.mul_add(progress, f64::from(from)).round() as i32
 }
 
@@ -233,7 +233,10 @@ mod tests {
         assert_eq!(plan.frame_count(), 20);
         assert_eq!(plan.setup_state().geometry.unwrap().y, -1080);
         assert_eq!(plan.setup_state().opacity, None);
-        assert_eq!(plan.final_state().geometry.unwrap(), visible());
+        assert_eq!(
+            plan.frame_state(plan.frame_count()).geometry.unwrap(),
+            visible()
+        );
     }
 
     #[test]
@@ -253,7 +256,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(plan.setup_state().geometry.unwrap(), visible());
-        assert_eq!(plan.final_state().opacity, Some(0.0));
+        assert_eq!(plan.frame_state(plan.frame_count()).opacity, Some(0.0));
         assert_eq!(plan.teardown_state().opacity, Some(1.0));
         assert_eq!(plan.teardown_state().geometry.unwrap().y, -1080);
     }
