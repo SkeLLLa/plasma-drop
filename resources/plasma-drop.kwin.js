@@ -153,6 +153,13 @@ cmds["MOVE_WINDOW"] = (params) => {
 cmds["RESIZE_WINDOW"] = (params) => {
     const window = kwin.getWindowByInternalIdRequired(params.internalId);
     const geometry = Object.assign({}, window.frameGeometry);
+    // KWin snaps logical sizes to the output's device pixels, so on fractional scales the
+    // frame differs from the requested size by less than a pixel. Re-requesting that size
+    // sends a configure whose late ack restores the position it was sent with, which leaves
+    // the window stuck at an animation frame partway across screens.
+    if (Math.abs(geometry.width - params.width) < 1 && Math.abs(geometry.height - params.height) < 1) {
+        return {};
+    }
     geometry.width = params.width;
     geometry.height = params.height;
     window.frameGeometry = geometry;
