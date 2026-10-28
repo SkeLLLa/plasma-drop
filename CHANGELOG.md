@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.14.2](https://github.com/SkeLLLa/plasma-drop/compare/v1.14.1...v1.14.2) - 2026-10-28
+
+### Other
+
+- *(readme)* add mp4 video to the side
+
 ## [1.14.1](https://github.com/SkeLLLa/plasma-drop/compare/v1.14.0...v1.14.1) - 2026-10-28
 
 ### Other
