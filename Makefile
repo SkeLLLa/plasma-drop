@@ -24,14 +24,14 @@ check: fmt-check clippy test doc lint-deny
 lint-deny:
 	cargo deny --locked check
 
-# The CI and packaging scripts. -S info: CI's shellcheck may flag what a newer one doesn't.
+# The CI, release and packaging scripts. -S info: CI's shellcheck may flag what a newer one doesn't.
 lint-shell:
-	shellcheck -S info packaging/ci/*.sh packaging/dist/*.sh scripts/*.sh scripts/*.bats
+	shellcheck -S info .ci/*.sh .ci/*.bats packaging/dist/*.sh
 
-# GitHub workflows and dependabot.yml, and the action pin checker (tests need bats). jactionlint also runs
-# shellcheck on `run:` scripts when shellcheck is on PATH. Not part of `check`: CI runs it in
-# its own job (ci.yml, actions-lint).
+# GitHub workflows and dependabot.yml, the action pin checker and the release helpers (tests
+# need bats). jactionlint also runs shellcheck on `run:` scripts when shellcheck is on PATH. Not
+# part of `check`: CI runs it in its own job (ci.yml, actions-lint).
 lint-actions:
 	jactionlint
-	bats scripts/check-action-pins.bats
-	scripts/check-action-pins.sh .github/workflows/*.yml
+	bats .ci/check-action-pins.bats .ci/release.bats
+	.ci/check-action-pins.sh .github/workflows/*.yml

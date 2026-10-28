@@ -1,0 +1,283 @@
+# Prepares a release on every push to master: release-plz bumps the version and CHANGELOG.md,
+# the bump is committed straight to master, and release.yml is started for that bump commit
+# (input `sha`), so its build provenance names the commit it tags. Then this run waits for the
+# release and fails with it, so whoever pushed is told.
+#
+# Only the run of master's HEAD acts: an older run whose commit master has left does nothing.
+# If the last bump was never tagged (master moved on before its release started, or the release
+# failed before tagging), that bump is undone locally and redone over every commit since the
+# last release, so the changelog never misses a commit. release.yml tags nothing when master is
+# no longer the commit it was started for, on a re-run as well; once tagged, it always finishes.
+#
+# Only the default GITHUB_TOKEN is used: a push made with it starts no workflow, but a
+# workflow_dispatch does, so no PAT or GitHub App is needed. Fails closed until every action is
+# pinned to a commit SHA (pin-gate). `gh workflow run release-prepare.yml --ref master` re-runs
+# it without a push (docs/distribution.md#recovery).
+name: Release (prepare)
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+# One at a time, and each waits for its release run: releases never overlap. A push during a
+# release waits; pending runs collapse into the newest, which sees every commit anyway.
+concurrency:
+  group: release-prepare
+  cancel-in-progress: false
+
+# Nothing is granted by default; each job asks for what it needs.
+permissions: {}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  pin-gate:
+    name: Action pin gate
+    if: ${{ github.repository_owner == 'SkeLLLa' && github.ref == 'refs/heads/master' && !contains(github.event.head_commit.message, '[skip ci]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Require every action in every workflow to be pinned
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # The gate itself is fetched as committed at GITHUB_SHA; no checkout, no third-party action.
+          gh api -H "Accept: application/vnd.github.raw" \
+            "repos/${GITHUB_REPOSITORY}/contents/.ci/pin-gate.sh?ref=${GITHUB_SHA}" > "${RUNNER_TEMP}/pin-gate.sh"
+          bash "${RUNNER_TEMP}/pin-gate.sh"
+
+  # Bumps the version and changelog and pushes the bump commit to master. Nothing else: the tag,
+  # the release and the crate all come from release.yml.
+  bump:
+    name: Bump version and changelog
+    needs: pin-gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      dispatch: ${{ steps.commit.outputs.target != '' }}
+      target: ${{ steps.commit.outputs.target }}
+      tag: ${{ steps.commit.outputs.tag }}
+    permissions:
+      contents: write
+    steps:
+      # No token in .git/config while third-party code runs: only the commit step pushes, with a
+      # one-shot header. The whole history and the tags: bump-base looks for the last release.
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
+
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@8a2045612414e945291083f820cd50b4d8fc2218 # v1.26.0
+
+      # Install via cargo-binstall like release-plz/action does: it picks the gnu build, while
+      # install-action only ships musl builds, which fail parsing the changelog template since
+      # 0.3.172 ("stack limit reached").
+      - name: Install release-plz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cargo binstall release-plz@0.4.0 --strategies crate-meta-data --no-confirm
+          release-plz --version
+
+      # mode: none (master moved on; that push's run acts), unreleased (the last bump was never
+      # tagged: redo it), normal (the last release is complete: bump). A tagged but unpublished
+      # release stops here until its Release run is re-run.
+      - name: Check the previous release is complete
+        id: state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Only the run of the newest push acts: older ones would release a commit master has left.
+          head="$(git ls-remote "https://github.com/${GITHUB_REPOSITORY}.git" refs/heads/master | cut -f1)"
+          if [ -z "${head}" ]; then echo "::error::could not read master"; exit 1; fi
+          if [ "${head}" != "${GITHUB_SHA}" ]; then
+            echo "::notice::master moved on to ${head}; the Release (prepare) run of that push prepares the release"
+            echo "mode=none" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          VERSION="$(.ci/release.sh version)"
+          TAG="v${VERSION}"
+          tag_sha="$(.ci/release.sh tag-commit "${TAG}")"
+          if [ -z "${tag_sha}" ]; then
+            # Bumped but never tagged: redo the bump so the release covers every commit up to now.
+            echo "::notice::${TAG} is not tagged yet; redoing its bump at ${GITHUB_SHA}"
+            echo "mode=unreleased" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          state="$(.ci/release.sh release-state "${TAG}")"
+          if [ "${state}" != published ]; then
+            echo "::error::${TAG} is tagged but not published (${state}). Re-run the failed jobs of its Release run; see docs/distribution.md#recovery"
+            exit 1
+          fi
+          rc=0
+          .ci/release.sh crate-published "${VERSION}" || rc=$?
+          case "${rc}" in
+            0) ;;
+            1) echo "::error::${TAG} is published on GitHub but not on crates.io; see docs/distribution.md#recovery"; exit 1 ;;
+            *) echo "::error::could not ask crates.io about ${VERSION}; re-run this job"; exit 1 ;;
+          esac
+          echo "mode=normal" >> "${GITHUB_OUTPUT}"
+
+      # Back to the last release: without its section and (if the bot set it) its version,
+      # release-plz bumps again over every commit since that release.
+      - name: Undo the unreleased bump
+        if: ${{ steps.state.outputs.mode == 'unreleased' }}
+        run: |
+          set -euo pipefail
+          VERSION="$(.ci/release.sh version)"
+          .ci/release.sh drop-changelog-section "${VERSION}" < CHANGELOG.md > "${RUNNER_TEMP}/CHANGELOG.md"
+          mv "${RUNNER_TEMP}/CHANGELOG.md" CHANGELOG.md
+          base="$(.ci/release.sh bump-base "${VERSION}")"
+          # Empty: a person set VERSION by hand. Keep it; release-plz only rewrites its section.
+          if [ -n "${base}" ]; then
+            .ci/release.sh set-version "${base}"
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if ! git diff --quiet; then
+            # Local only, so release-plz sees a clean tree: the commit step squashes everything
+            # onto GITHUB_SHA. release-plz.toml keeps chore(release) commits out of the changelog.
+            git commit -qam "chore(release): undo unreleased v${VERSION}"
+          fi
+
+      - name: Bump version and changelog
+        if: ${{ steps.state.outputs.mode == 'normal' || steps.state.outputs.mode == 'unreleased' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: release-plz update --config release-plz.toml
+
+      # `[skip ci]` keeps ci.yml off the bump commit; a GITHUB_TOKEN push starts no workflow anyway.
+      # target: the commit to release, empty when there is nothing to release; tag: its tag.
+      - name: Commit version bump
+        id: commit
+        if: ${{ steps.state.outputs.mode == 'normal' || steps.state.outputs.mode == 'unreleased' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MODE: ${{ steps.state.outputs.mode }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # One commit on top of the pushed commit, whatever the undo step did locally.
+          git reset -q --soft "${GITHUB_SHA}"
+          git add -A
+          VERSION="$(.ci/release.sh version)"
+          if git diff --cached --quiet; then
+            if [ "${MODE}" = unreleased ]; then
+              # The redo changed nothing (no commit since the bump): release the commit as it is.
+              printf 'target=%s\ntag=v%s\n' "${GITHUB_SHA}" "${VERSION}" >> "${GITHUB_OUTPUT}"
+            else
+              echo "No changes produced by release-plz update"
+            fi
+            exit 0
+          fi
+          git commit -qm "chore(release): v${VERSION} [skip ci]"
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "${GH_TOKEN}" | base64 -w0)"
+          if ! git -c "http.https://github.com/.extraheader=${auth}" push origin HEAD:master; then
+            head="$(git ls-remote "https://github.com/${GITHUB_REPOSITORY}.git" refs/heads/master | cut -f1)"
+            if [ -n "${head}" ] && [ "${head}" != "${GITHUB_SHA}" ]; then
+              echo "::notice::master moved on to ${head} during the bump; the Release (prepare) run of that push prepares the release"
+              exit 0
+            fi
+            echo "::error::pushing the version bump failed"
+            exit 1
+          fi
+          printf 'target=%s\ntag=v%s\n' "$(git rev-parse HEAD)" "${VERSION}" >> "${GITHUB_OUTPUT}"
+
+  # Starts release.yml for the target commit and waits for it. This job can start workflows and
+  # holds nothing else: no contents, no id-token. Polls instead of `gh run watch`: the run may
+  # queue behind another release, and a few API errors in a row must not fail the wait.
+  dispatch:
+    name: Run the release
+    needs: bump
+    if: ${{ needs.bump.outputs.dispatch == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    permissions:
+      actions: write
+    steps:
+      - name: Dispatch release.yml for the target commit and wait for it
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET: ${{ needs.bump.outputs.target }}
+          TAG: ${{ needs.bump.outputs.tag }}
+        run: |
+          set -euo pipefail
+          R="${GITHUB_REPOSITORY}"
+          head="$(git ls-remote "https://github.com/${R}.git" refs/heads/master | cut -f1)"
+          if [ -z "${head}" ]; then echo "::error::could not read master"; exit 1; fi
+          if [ "${head}" != "${TARGET}" ]; then
+            echo "::notice::master moved on to ${head}; the Release (prepare) run of that push starts the release"
+            exit 0
+          fi
+          since="$(date -u -d '-1 minute' +%Y-%m-%dT%H:%M:%SZ)"
+          # return_run_details: a 200 with the run id instead of a 204 (API version 2022-11-28, which
+          # gh sends). gh workflow run still allows for a 204, so the lookup below stays as a fallback.
+          resp="$(gh api -X POST "repos/${R}/actions/workflows/release.yml/dispatches" \
+            -f ref=master -f "inputs[sha]=${TARGET}" -F return_run_details=true)"
+          run_id="$(jq -r '.workflow_run_id // empty' <<< "${resp:-null}")"
+          for _ in $(seq 1 30); do
+            [ -n "${run_id}" ] && break
+            sleep 10
+            run_id="$(gh api -X GET "repos/${R}/actions/workflows/release.yml/runs" \
+              -f event=workflow_dispatch -f branch=master -f head_sha="${TARGET}" -f created=">=${since}" \
+              --jq '[.workflow_runs[] | select(.actor.login == "github-actions[bot]")] | sort_by(.created_at) | last | .id // empty')"
+          done
+          if [ -z "${run_id}" ]; then
+            echo "::error::could not find the dispatched Release run; run gh workflow run release-prepare.yml --ref master"
+            exit 1
+          fi
+          url="https://github.com/${R}/actions/runs/${run_id}"
+          echo "Release run: ${url}"
+          fails=0
+          while :; do
+            # Space separated, no empty field: `read` would merge it with its neighbour.
+            if out="$(gh api "repos/${R}/actions/runs/${run_id}" --jq '"\(.status) \(.conclusion // "none") \(.head_sha)"')"; then
+              fails=0
+              read -r status conclusion run_head <<< "${out}"
+              [ "${status}" = completed ] && break
+            else
+              fails=$((fails + 1))
+              if [ "${fails}" -ge 10 ]; then echo "::error::lost track of ${url}"; exit 1; fi
+            fi
+            sleep 60
+          done
+          if [ "${run_head}" != "${TARGET}" ]; then
+            echo "::notice::master moved on before the release started (${url} ran at ${run_head}); the Release (prepare) run of the newest push releases it"
+            exit 0
+          fi
+          # The tag decides the recovery: once it exists, only that run can finish the release.
+          if ! tags="$(git ls-remote --tags "https://github.com/${R}.git" "refs/tags/${TAG}" "refs/tags/${TAG}^{}")"; then
+            echo "::error::could not read tag ${TAG}; ${url} ended ${conclusion}; see docs/distribution.md#recovery"
+            exit 1
+          fi
+          tagged=false
+          if grep -q "^${TARGET}"$'\t' <<< "${tags}"; then tagged=true; fi
+          case "${conclusion}:${tagged}" in
+            success:true) ;;
+            success:false)
+              echo "::notice::master moved on before ${url} tagged ${TAG}; the Release (prepare) run of the newest push releases it" ;;
+            *:true)
+              echo "::error::the release failed (${conclusion}) after tagging ${TAG}: re-run the failed jobs of ${url}, not this run; see docs/distribution.md#recovery"
+              exit 1 ;;
+            cancelled:false)
+              # Usually a newer Release run replaced this one while it was queued.
+              echo "::notice::${url} was cancelled before tagging ${TAG}; the next Release (prepare) run releases it (a push, or gh workflow run release-prepare.yml --ref master)" ;;
+            *)
+              echo "::error::the release failed (${conclusion}) before tagging ${TAG}: push to master or run gh workflow run release-prepare.yml --ref master, which redoes the bump and starts a new release; see docs/distribution.md#recovery"
+              exit 1 ;;
+          esac

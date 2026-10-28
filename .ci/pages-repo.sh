@@ -5,7 +5,7 @@
 # `repo` job fetched from recent releases.
 #
 # Usage:
-#   packaging/ci/pages-repo.sh ASSETS OUT BASE_URL VERSION
+#   .ci/pages-repo.sh ASSETS OUT BASE_URL VERSION
 #       ASSETS    plasma-drop_*_{amd64,arm64}.deb and plasma-drop-*-1.{x86_64,aarch64}.rpm
 #                 files; those of VERSION must be among them
 #       OUT       the site directory to create (must not exist)

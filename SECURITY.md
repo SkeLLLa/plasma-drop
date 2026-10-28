@@ -20,5 +20,9 @@ GitHub Pages, including the release workflow and the package signing key.
 
 ## Verifying what you downloaded
 
-Every release artifact has signed build provenance tying it to this repository, the commit and
-the workflow run that built it. See [docs/verifying.md](docs/verifying.md).
+Every release artifact has signed build provenance tying it to this repository, the workflow run
+that built it, and the commit it was built from (the tagged commit; for v1.14.2 and earlier, the
+commit that release's run was started for, usually the one just before the version bump).
+The crate on crates.io is the attested `.crate` attached to the release, for releases that carry
+one. Releases are published only after every check passes. A release marked Immutable on its release
+page can't be changed after it is published. See [docs/verifying.md](docs/verifying.md).

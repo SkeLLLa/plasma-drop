@@ -29,7 +29,7 @@ jobs:
         uses: opensource-nepal/commitlint@9c112b70de7b0e51f81d12a5268a451db5419794 # v2.0.0
 
   # Every action is pinned to a commit SHA and every container image to a digest listed in
-  # packaging/ci/images.env (Dependabot bumps the action SHAs and their version comments). An
+  # .ci/images.env (Dependabot bumps the action SHAs and their version comments). An
   # unpinned one fails here and in the release pin-gate.
   pin-check:
     name: Action pins
@@ -50,9 +50,11 @@ jobs:
           install_args: bats
           cache: false
       - name: Test the pin checker
-        run: bats scripts/check-action-pins.bats
+        run: bats .ci/check-action-pins.bats
+      - name: Test the release helpers
+        run: bats .ci/release.bats
       - name: Check action pins
-        run: scripts/check-action-pins.sh .github/workflows/*.yml
+        run: .ci/check-action-pins.sh .github/workflows/*.yml
 
   # Static analysis of the workflows (injection, excessive permissions, unpinned actions...).
   zizmor:

@@ -11,7 +11,7 @@
 [![macOS: quartz-drop](https://img.shields.io/badge/macOS-quartz--drop-black?logo=apple)](https://github.com/SkeLLLa/quartz-drop)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/SkeLLLa/plasma-drop/badge)](https://scorecard.dev/viewer/?uri=github.com/SkeLLLa/plasma-drop)
 [![SLSA Build L2](https://img.shields.io/badge/SLSA-Build%20L2-green)](docs/verifying.md#build-provenance)
-[![Build provenance: attested](https://img.shields.io/badge/provenance-attested-green?logo=githubactions&logoColor=white)](https://github.com/SkeLLLa/plasma-drop/attestations)
+[![Provenance](https://img.shields.io/endpoint?url=https%3A%2F%2Fskellla.github.io%2Fplasma-drop%2Fprovenance-badge.json)](docs/verifying.md)
 
 `plasma-drop` is a KDE Plasma 6 dropdown app launcher. It registers global shortcuts through
 KWin, finds or starts the apps you configure, and moves their windows into dropdown-style screen
@@ -122,7 +122,7 @@ packslip install github.com/SkeLLLa/plasma-drop --pin ps1_4yd5vxao3lfzaox72lynxu
 cargo install plasma-drop --locked
 ```
 
-The packslip `--pin` fingerprint identifies this repository's release workflow and stays the same
+The packslip `--pin` fingerprint identifies this repository (not a workflow) and stays the same
 across releases. Check it against this README rather than trusting it on first use. With mise,
 `mise use -g packslip:github.com/SkeLLLa/plasma-drop` also checks the signed manifest.
 
@@ -136,11 +136,15 @@ the releases page, run:
 ```sh
 gh attestation verify plasma-drop-<version>-x86_64-unknown-linux-gnu.tar.gz \
   --repo SkeLLLa/plasma-drop \
-  --signer-workflow SkeLLLa/plasma-drop/.github/workflows/release.yml
+  --signer-workflow SkeLLLa/plasma-drop/.github/workflows/release.yml \
+  --source-ref refs/heads/master
 ```
 
-[docs/verifying.md](docs/verifying.md) covers every artifact and what each check proves. To report
-a vulnerability, see [SECURITY.md](SECURITY.md).
+Crates published by this pipeline carry the same provenance (releases with a `plasma-drop-<version>.crate` asset); see [docs/verifying.md](docs/verifying.md#cratesio).
+
+Newer releases also attach `plasma-drop-<version>.intoto.jsonl` (use it with `--bundle`) and can
+be immutable (marked Immutable on the release page; check with `gh release verify v<version>`). [docs/verifying.md](docs/verifying.md) covers every
+artifact and what each check proves. To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
 ### After installing
 
@@ -339,14 +343,23 @@ generated dependency update commits.
 The repo release flow is:
 
 1. Push commits to `master`
-2. `release-plz update` updates the version and `CHANGELOG.md` directly in the workflow checkout
-3. The workflow commits that release bump back to `master`
-4. `release-plz release` publishes the crate, creates the tag, and creates the GitHub release
-5. The same workflow attaches the `tar.gz`, `deb`, and `rpm` assets to that release
-6. The workflow also attaches `SHA256SUMS` and one `.sha256` checksum sidecar per artifact
-7. Separate jobs sign a `packslip.sigstore.json` manifest for the `tar.gz`, upload it, and verify
-   the published release against the signer fingerprint above
-8. The workflow signs the `rpm`, then publishes signed RPM/APT repositories to GitHub Pages
+2. `release-prepare.yml` runs `release-plz update`, which updates the version and `CHANGELOG.md`,
+   and commits that release bump back to `master`
+3. It then starts `release.yml` for that exact commit and waits for it; if `master` has moved on
+   by then, the newest push's run redoes the bump instead
+4. `release-plz release` tags that commit and creates a **draft** GitHub release
+5. The workflow builds the `tar.gz`, `deb`, and `rpm` assets and packages the crate
+   (`plasma-drop-<version>.crate`), signs the `rpm`, and writes
+   `SHA256SUMS`, one `.sha256` sidecar per artifact, and the build provenance bundle
+   `plasma-drop-<version>.intoto.jsonl`
+6. A separate job signs a `packslip.sigstore.json` manifest for the `tar.gz`; every signature is
+   verified before anything is uploaded
+7. All files are uploaded to the draft and compared byte for byte with what was built
+8. The exact attested `.crate` is published to crates.io (the workflow checks crates.io's
+   checksum against it), then the release is published (immutable from then on when release
+   immutability is enabled) and verified again from its public URLs; only then is the
+   provenance badge updated
+9. The workflow publishes signed RPM/APT repositories and the badge to GitHub Pages
    ([Linux signing](docs/distribution.md#linux-signing))
 
 Crates.io publishing uses trusted publishing through GitHub Actions OIDC. After the first manual
