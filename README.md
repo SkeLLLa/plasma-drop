@@ -9,6 +9,9 @@
 [![Crates.io](https://img.shields.io/crates/v/plasma-drop.svg)](https://crates.io/crates/plasma-drop)
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](COPYING)
 [![macOS: quartz-drop](https://img.shields.io/badge/macOS-quartz--drop-black?logo=apple)](https://github.com/SkeLLLa/quartz-drop)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/SkeLLLa/plasma-drop/badge)](https://scorecard.dev/viewer/?uri=github.com/SkeLLLa/plasma-drop)
+[![SLSA Build L2](https://img.shields.io/badge/SLSA-Build%20L2-green)](docs/verifying.md#build-provenance)
+[![Build provenance: attested](https://img.shields.io/badge/provenance-attested-green?logo=githubactions&logoColor=white)](https://github.com/SkeLLLa/plasma-drop/attestations)
 
 `plasma-drop` is a KDE Plasma 6 dropdown app launcher. It registers global shortcuts through
 KWin, finds or starts the apps you configure, and moves their windows into dropdown-style screen
@@ -24,7 +27,8 @@ On macOS, use the sibling project [quartz-drop](https://github.com/SkeLLLa/quart
 Swift port of `plasma-drop` and reads the same config file.
 
 **Contents:** [Install](#install) · [First Run](#first-run) · [Configure Apps](#configure-apps) ·
-[Documentation](#documentation) · [Development](#development) ·
+[Verify Your Download](#verify-your-download) · [Documentation](#documentation) ·
+[Development](#development) ·
 [Distribution and Releases](#distribution-and-releases) · [Support Ukraine](#support-ukraine)
 
 ## Demo
@@ -121,6 +125,22 @@ cargo install plasma-drop --locked
 The packslip `--pin` fingerprint identifies this repository's release workflow and stays the same
 across releases. Check it against this README rather than trusting it on first use. With mise,
 `mise use -g packslip:github.com/SkeLLLa/plasma-drop` also checks the signed manifest.
+
+### Verify your download
+
+Every release file is built by this repository's release workflow on GitHub-hosted runners and
+carries signed [build provenance](https://github.com/SkeLLLa/plasma-drop/attestations) naming the
+commit and the run that built it. APT, DNF and packslip check signatures for you; for a file from
+the releases page, run:
+
+```sh
+gh attestation verify plasma-drop-<version>-x86_64-unknown-linux-gnu.tar.gz \
+  --repo SkeLLLa/plasma-drop \
+  --signer-workflow SkeLLLa/plasma-drop/.github/workflows/release.yml
+```
+
+[docs/verifying.md](docs/verifying.md) covers every artifact and what each check proves. To report
+a vulnerability, see [SECURITY.md](SECURITY.md).
 
 ### After installing
 
@@ -244,6 +264,7 @@ examples, and [docs/configuration.md](docs/configuration.md) for every supported
 - [Getting started](docs/getting-started.md)
 - [Configuration](docs/configuration.md)
 - [Distribution](docs/distribution.md)
+- [Verifying a release](docs/verifying.md)
 - [Development](docs/development.md)
 - [GitHub Copilot review setup](docs/copilot-review.md)
 - [Documentation index](docs/index.md)

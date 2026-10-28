@@ -270,6 +270,8 @@ sha256sum -c plasma-drop-<version>-<arch>-unknown-linux-gnu.tar.gz.sha256
 ```
 
 The release also includes `SHA256SUMS` for checking all downloaded artifacts at once.
+Checksums only catch a corrupted download; to check that a file was built by this repository's
+release workflow, verify its build provenance as described in [verifying.md](verifying.md).
 
 ### Native package
 

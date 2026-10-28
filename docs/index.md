@@ -22,6 +22,7 @@
 - [`copilot-review`](copilot-review.md): GitHub Copilot review instructions and maintainer workflow.
 - [`distribution`](distribution.md): release artifact layout plus manual install steps for archive, `deb`, and `rpm` installs.
   It also documents the `cargo install` path.
+- [`verifying`](verifying.md): checking a download's build provenance, signatures and checksums.
 
 ## Related Project
 
