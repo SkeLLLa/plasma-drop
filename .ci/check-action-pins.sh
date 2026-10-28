@@ -1,7 +1,7 @@
 #!/bin/sh
 # Check every `uses:` line in each workflow/action file. POSIX sh + awk only (BSD awk, mawk, gawk).
 # Callers must include .github/actions/**/action.y?ml whenever that tree exists.
-# Usage: scripts/check-action-pins.sh [--warn] <workflow-or-action.yml>...
+# Usage: .ci/check-action-pins.sh [--warn] <workflow-or-action.yml>...
 #   Strict and fail-closed: this is a line scanner, not a YAML parser, so any YAML feature that could
 #   hide a `uses` is an error. --warn annotates unpinned `uses` refs and returns 0 for CI transition
 #   mode; structure errors (anchors, aliases, tags, merge keys, complex keys, flow collections,
@@ -189,9 +189,9 @@ done
 awk_status=0
 awk -v warnmode="${warn}" -v prehard="${prehard}" -f "${prog}" "$@" /dev/null || awk_status=$?
 
-# Every pinned container image must be one of packaging/ci/images.env (IMAGES overrides the
+# Every pinned container image must be one of .ci/images.env (IMAGES overrides the
 # path, for the tests), so CI and the local `mise run linux:container:*` tasks run the same bits.
-images="${IMAGES:-$(dirname "$0")/../packaging/ci/images.env}"
+images="${IMAGES:-$(dirname "$0")/images.env}"
 if [ -f "${images}" ] && [ "${awk_status}" -eq 0 ]; then
     known="$(sed -n 's/^[A-Z_]*_IMAGE=//p' "${images}")"
     for f in "$@"; do
@@ -199,7 +199,7 @@ if [ -f "${images}" ] && [ "${awk_status}" -eq 0 ]; then
             grep -oE '[A-Za-z0-9._/-]+:[A-Za-z0-9._-]+@sha256:[0-9a-f]{64}' |
             while read -r ref; do
                 printf '%s\n' "${known}" | grep -qxF "${ref}" || {
-                    echo "::error file=${f}::image ${ref} is not in packaging/ci/images.env" >&2
+                    echo "::error file=${f}::image ${ref} is not in .ci/images.env" >&2
                     echo bad
                 }
             done

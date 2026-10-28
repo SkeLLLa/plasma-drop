@@ -1,14 +1,36 @@
+# Tags, builds, signs, verifies and publishes a release. release-prepare.yml starts it on
+# `master` with a workflow_dispatch right after it pushes the version bump, passing that commit
+# as input `sha`, so the run's commit (github.sha) is the bump commit and release-plz tags
+# exactly that commit: the build provenance names the commit the tag points to. If master has
+# moved on (github.sha != sha when dispatched, or master != github.sha just before tagging, which
+# also covers a re-run or a long-queued run), it tags nothing and ends green; the Release
+# (prepare) run of the newest push redoes the bump and releases instead. Once the tag exists at
+# github.sha, re-runs go through whatever master is, so a tagged release can always be finished.
+#
+# Only master: pin-gate refuses any other ref, so every job is skipped there, and the
+# linux-signing and github-pages environments allow only master as well. Verifiers check
+# `--source-ref refs/heads/master`, which rejects a build from any other branch.
+#
+# Nothing is publicly visible (crate, published release, `latest`, Pages) until verify-linux,
+# verify-signatures, upload-draft's byte comparison and repo's site checks have all passed. The
+# release stays a draft until then, and the order is publish-crate → publish → verify-published
+# → pages: Pages, with the provenance badge, is deployed only once the public release has passed
+# verify-published. `publish` is the only job with contents: write after upload-draft.
+#
 # Release fails closed until every action is pinned to a commit SHA (pin-gate).
 name: Release
 
 on:
-  push:
-    branches:
-      - master
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "Commit to release: master's HEAD as prepared by release-prepare.yml"
+        required: true
+        type: string
 
-# One release at a time: a push during a release waits for it instead of cancelling it.
+# One release at a time: a second dispatch waits for the running one instead of cancelling it.
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-publish
   cancel-in-progress: false
 
 # Nothing is granted by default; each job asks for what it needs.
@@ -20,47 +42,45 @@ env:
 jobs:
   pin-gate:
     name: Action pin gate
-    if: ${{ github.repository_owner == 'SkeLLLa' && !contains(github.event.head_commit.message, '[skip ci]') }}
+    if: ${{ github.repository_owner == 'SkeLLLa' && github.ref == 'refs/heads/master' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    outputs:
+      current: ${{ steps.current.outputs.current }}
     permissions:
       contents: read
     steps:
+      # A run whose master moved on before the dispatch ends green here: every later job needs
+      # quality, which needs current. Both SHAs are fixed at dispatch, so re-runs pass this;
+      # the release job checks live master again before it tags.
+      - name: Check master is still the prepared commit
+        id: current
+        env:
+          WANTED_SHA: ${{ inputs.sha }}
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_SHA}" = "${WANTED_SHA}" ]; then
+            echo "current=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "::notice::master is at ${GITHUB_SHA}, not ${WANTED_SHA}: nothing to do here; the Release (prepare) run of the newest push prepares and starts the release"
+            echo "current=false" >> "${GITHUB_OUTPUT}"
+          fi
+
       - name: Require every action in every workflow to be pinned
+        if: ${{ steps.current.outputs.current == 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          # Fetch every workflow, the checker and its image list, as committed at the
-          # triggering SHA; no checkout, no third-party action. Fails closed: no files, no
-          # listing or any failed fetch fails the gate, and so does an unpinned action in ci.yml.
-          dir="${RUNNER_TEMP}/workflows"
-          mkdir -p "${dir}" "${RUNNER_TEMP}/scripts" "${RUNNER_TEMP}/packaging/ci"
-          fetch() {
-            gh api -H "Accept: application/vnd.github.raw" \
-              "repos/${GITHUB_REPOSITORY}/contents/$1?ref=${GITHUB_SHA}"
-          }
-          names="$(
-            gh api "repos/${GITHUB_REPOSITORY}/contents/.github/workflows?ref=${GITHUB_SHA}" \
-              --jq '.[] | select(.type == "file") | select(.name | test("\\.ya?ml$")) | .name'
-          )"
-          if [ -z "${names}" ]; then
-            echo "::error::no workflow files found at ${GITHUB_SHA}"
-            exit 1
-          fi
-          files=()
-          while IFS= read -r name; do
-            case "${name}" in */* | "") echo "::error::unexpected workflow name"; exit 1 ;; esac
-            fetch ".github/workflows/${name}" > "${dir}/${name}"
-            files+=("${dir}/${name}")
-          done <<< "${names}"
-          fetch scripts/check-action-pins.sh > "${RUNNER_TEMP}/scripts/check-action-pins.sh"
-          fetch packaging/ci/images.env > "${RUNNER_TEMP}/packaging/ci/images.env"
-          sh "${RUNNER_TEMP}/scripts/check-action-pins.sh" "${files[@]}"
+          # The gate itself is fetched as committed at GITHUB_SHA; no checkout, no third-party action.
+          gh api -H "Accept: application/vnd.github.raw" \
+            "repos/${GITHUB_REPOSITORY}/contents/.ci/pin-gate.sh?ref=${GITHUB_SHA}" > "${RUNNER_TEMP}/pin-gate.sh"
+          bash "${RUNNER_TEMP}/pin-gate.sh"
 
   quality:
     name: Quality gate
     needs: pin-gate
+    if: ${{ needs.pin-gate.outputs.current == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -87,38 +107,33 @@ jobs:
       - name: Run quality checks
         run: make check
 
-  # Bumps the version, publishes the crate, creates the tag and the GitHub release. It builds
-  # and uploads no assets: linux-assets builds them, and they go out only after sign-linux,
-  # verify-linux and checksums (publish-assets).
+  # Creates the tag on github.sha and a draft release; nothing here is public yet. The version
+  # bump happened in release-prepare.yml, and the crate is published by publish-crate, after
+  # every check.
   release:
-    name: Release
+    name: Tag and draft release
     needs: quality
     runs-on: ubuntu-latest
     timeout-minutes: 45
     outputs:
-      released: ${{ steps.release-plz.outputs.released }}
-      version: ${{ steps.release-plz.outputs.version }}
-      tag_name: ${{ steps.release-plz.outputs.tag_name }}
+      released: ${{ steps.state.outputs.released }}
+      version: ${{ steps.state.outputs.version }}
+      tag_name: ${{ steps.state.outputs.tag_name }}
     permissions:
       contents: write
-      id-token: write
     steps:
-      # This job pushes the version bump, so its checkout keeps the token.
+      # release-plz creates the tag and the release through the API with --git-token; nothing is
+      # pushed, so the checkout keeps no token.
       - name: Checkout repository
-        # zizmor: ignore[artipacked]
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: false
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: stable
-
-      - name: Authenticate to crates.io (trusted publishing)
-        id: crates-auth
-        uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
 
       - name: Install cargo-binstall
         uses: cargo-bins/cargo-binstall@8a2045612414e945291083f820cd50b4d8fc2218 # v1.26.0
@@ -133,48 +148,86 @@ jobs:
           cargo binstall release-plz@0.4.0 --strategies crate-meta-data --no-confirm
           release-plz --version
 
-      - name: Bump version and changelog
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: release-plz update --config release-plz.toml
-
-      - name: Commit version bump
-        id: commit
-        run: |
-          if git diff --quiet && git diff --cached --quiet; then
-            echo "No changes produced by release-plz update"
-            exit 0
-          fi
-          VERSION="$(awk -F '"' '/^version/ { print $2; exit }' Cargo.toml)"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "chore(release): v${VERSION} [skip ci]"
-          git push origin HEAD:master
-
-      - name: Publish to crates.io and create GitHub release
-        id: release-plz
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CARGO_REGISTRY_TOKEN: ${{ steps.crates-auth.outputs.token }}
+      # The gate in pin-gate saw only the SHAs fixed at dispatch. A re-run, or a run that queued
+      # while master moved on, must not tag a commit master has left: the newest push's prepare
+      # run redoes the bump over it. Once the tag is at github.sha, go on whatever master is:
+      # that is the recovery of a tagged release.
+      - name: Check master is still this commit
+        id: live
         run: |
           set -euo pipefail
-          OUTPUT_FILE="${RUNNER_TEMP}/release-plz-output.json"
-          release-plz release --config release-plz.toml --git-token "${GITHUB_TOKEN}" -o json | tee "${OUTPUT_FILE}"
-          RELEASES="$(jq -c '.releases // []' "${OUTPUT_FILE}")"
-          RELEASED="$(jq -r '((.releases // []) | length > 0)' "${OUTPUT_FILE}")"
-          VERSION="$(jq -r '(.releases // [])[0].version // ""' "${OUTPUT_FILE}")"
-          TAG_NAME="$(jq -r '(.releases // [])[0].tag // ""' "${OUTPUT_FILE}")"
+          TAG="v$(.ci/release.sh version)"
+          # An assignment, so a failed lookup fails the step.
+          tag_sha="$(.ci/release.sh tag-commit "${TAG}")"
+          if [ "${tag_sha}" = "${GITHUB_SHA}" ]; then exit 0; fi
+          head="$(git ls-remote "https://github.com/${GITHUB_REPOSITORY}.git" refs/heads/master | cut -f1)"
+          if [ -z "${head}" ]; then echo "::error::could not read master"; exit 1; fi
+          if [ "${head}" != "${GITHUB_SHA}" ]; then
+            echo "::notice::master moved on to ${head}: ${GITHUB_SHA} is not tagged or released; the Release (prepare) run of the newest push releases it"
+            echo "superseded=true" >> "${GITHUB_OUTPUT}"
+          fi
+
+      # Tags the checked-out commit (github.sha) and creates a draft release (release-plz.toml).
+      # Its output is only logged: the next step decides from what GitHub holds.
+      - name: Create the tag and the draft release
+        if: ${{ steps.live.outputs.superseded != 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          release-plz release --config release-plz.toml --git-token "${GITHUB_TOKEN}" -o json |
+            tee "${RUNNER_TEMP}/release-plz-output.json"
+
+      # The single tag → commit resolution. Later jobs build github.sha, which this asserts is
+      # what the tag names; upload-draft and publish check it again before they change anything.
+      # Also resumes a run that tagged but failed before the draft existed.
+      - name: Decide what to release
+        id: state
+        if: ${{ steps.live.outputs.superseded != 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="$(.ci/release.sh version)"
+          TAG="v${VERSION}"
+          tag_sha="$(.ci/release.sh tag-commit "${TAG}")"
+          released=false
+          if [ -z "${tag_sha}" ]; then
+            echo "::notice::nothing to release: ${TAG} was not tagged"
+          elif [ "${tag_sha}" != "${GITHUB_SHA}" ]; then
+            # A lookup error fails the step (exit 2): it is never read as "no release".
+            state="$(.ci/release.sh release-state "${TAG}")"
+            if [ "${state}" != published ]; then
+              echo "::error::unpublished ${TAG} belongs to ${tag_sha}, not ${GITHUB_SHA}; re-run that commit's Release run (docs/distribution.md#recovery)"
+              exit 1
+            fi
+            echo "::notice::${TAG} is already released from ${tag_sha}"
+          else
+            state="$(.ci/release.sh release-state "${TAG}")"
+            case "${state}" in
+              draft) released=true ;;
+              published) echo "::notice::${TAG} is already published" ;;
+              none)
+                # The tag was made but creating the draft failed: make it now.
+                .ci/release.sh changelog-notes "${VERSION}" < CHANGELOG.md > "${RUNNER_TEMP}/notes.md"
+                pre=false
+                case "${VERSION}" in *-*) pre=true ;; esac
+                gh release create "${TAG}" --repo "${GITHUB_REPOSITORY}" --draft --verify-tag \
+                  --title "${TAG}" --notes-file "${RUNNER_TEMP}/notes.md" --prerelease="${pre}"
+                released=true
+                ;;
+              *) echo "::error::unexpected release state '${state}'"; exit 1 ;;
+            esac
+          fi
           {
-            echo "released=${RELEASED}"
+            echo "released=${released}"
             echo "version=${VERSION}"
-            echo "tag_name=${TAG_NAME}"
-            echo "releases=${RELEASES}"
+            echo "tag_name=${TAG}"
           } >> "${GITHUB_OUTPUT}"
 
   # --- Build (read-only) ---------------------------------------------------------------------
-  # Once per architecture, on a native runner. Checksums and provenance come from the checksums
-  # job, the upload from publish-assets.
+  # Once per architecture, on a native runner, at github.sha (the tagged commit). Checksums and
+  # provenance come from the checksums job, the upload from upload-draft.
   linux-assets:
     name: Linux assets (${{ matrix.arch }}-unknown-linux-gnu)
     needs: release
@@ -195,10 +248,9 @@ jobs:
       RPM: plasma-drop-${{ needs.release.outputs.version }}-1.${{ matrix.arch }}.rpm
       VERSION: ${{ needs.release.outputs.version }}
     steps:
-      - name: Checkout release tag
+      - name: Checkout the release commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.release.outputs.tag_name }}
           persist-credentials: false
 
       - name: Install Rust toolchain
@@ -285,7 +337,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-linux-tar-${{ matrix.arch }}
-          retention-days: 1
+          retention-days: 7
           if-no-files-found: error
           path: target/dist/plasma-drop-${{ env.VERSION }}-${{ env.TARGET }}.tar.gz
 
@@ -293,7 +345,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-linux-deb-${{ matrix.arch }}
-          retention-days: 1
+          retention-days: 7
           if-no-files-found: error
           path: target/debian/${{ env.DEB }}
 
@@ -301,9 +353,69 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-linux-rpm-${{ matrix.arch }}
-          retention-days: 1
+          retention-days: 7
           if-no-files-found: error
           path: target/generate-rpm/${{ env.RPM }}
+
+  # The .crate that crates.io will serve, packaged at github.sha. `cargo package` also builds the
+  # packaged source, as `cargo publish` would. checksums attests it with the other assets and
+  # publish-crate publishes exactly these bytes, with the Rust version recorded here (cargo
+  # writes the archive deterministically, but the normalized Cargo.toml and gzip come from cargo).
+  # If an earlier attempt of this run already published it, that file is kept instead.
+  crate-package:
+    name: Package the crate
+    needs: release
+    if: ${{ needs.release.outputs.released == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      rust: ${{ steps.package.outputs.rust }}
+    env:
+      VERSION: ${{ needs.release.outputs.version }}
+    steps:
+      - name: Checkout the release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
+
+      - name: Package the crate
+        id: package
+        run: |
+          set -euo pipefail
+          crate="plasma-drop-${VERSION}.crate"
+          mkdir dist
+          rc=0
+          .ci/release.sh crate-published "${VERSION}" || rc=$?
+          case "${rc}" in
+            1)
+              cargo package --locked
+              cp -- "target/package/${crate}" dist/
+              ;;
+            0)
+              echo "::notice::plasma-drop ${VERSION} is already on crates.io: keeping the file this run published"
+              curl -fsSL --retry 3 -o "dist/${crate}" "https://static.crates.io/crates/plasma-drop/${crate}"
+              .ci/release.sh crate-check "${VERSION}" "dist/${crate}" "${GITHUB_SHA}" "${GITHUB_RUN_ID}"
+              ;;
+            *) echo "::error::could not ask crates.io about ${VERSION}; re-run the failed jobs"; exit 1 ;;
+          esac
+          rust="$(rustc --version | cut -d ' ' -f 2)"
+          [[ "${rust}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::unexpected rustc version '${rust}'"; exit 1; }
+          echo "rust=${rust}" >> "${GITHUB_OUTPUT}"
+
+      - name: Keep the crate
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-crate
+          retention-days: 7
+          if-no-files-found: error
+          path: dist/plasma-drop-${{ env.VERSION }}.crate
 
   # Signs the .rpm files with the subkey held in the linux-signing environment, checked against
   # the pin packaging/signing/repo.asc; without the pin (and the secret) the packages pass through
@@ -325,10 +437,9 @@ jobs:
       - name: Install git, rpm-sign and gnupg
         run: dnf install -y -q git-core rpm-sign gnupg2
 
-      - name: Checkout release tag
+      - name: Checkout the release commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.release.outputs.tag_name }}
           persist-credentials: false
 
       # One directory per artifact: dist/release-linux-rpm-<arch>/.
@@ -348,9 +459,9 @@ jobs:
           export GNUPGHOME="${RUNNER_TEMP}/gnupg"
           mkdir -m 700 "${GNUPGHOME}"
           trap 'rm -rf "${GNUPGHOME}"' EXIT
-          packaging/ci/linux-signing.sh import
+          .ci/linux-signing.sh import
           if [ -f packaging/signing/repo.asc ]; then
-            packaging/ci/linux-signing.sh sign-rpm dist/*/*.rpm
+            .ci/linux-signing.sh sign-rpm dist/*/*.rpm
           fi
 
       - name: Replace the x86_64 package with the signed one
@@ -358,7 +469,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-linux-rpm-x86_64
-          retention-days: 1
+          retention-days: 7
           if-no-files-found: error
           overwrite: true
           path: dist/release-linux-rpm-x86_64/*.rpm
@@ -368,7 +479,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-linux-rpm-aarch64
-          retention-days: 1
+          retention-days: 7
           if-no-files-found: error
           overwrite: true
           path: dist/release-linux-rpm-aarch64/*.rpm
@@ -377,6 +488,7 @@ jobs:
   verify-linux:
     name: Verify Linux ${{ matrix.kind }} (${{ matrix.name }})
     needs: [release, sign-linux]
+    if: ${{ needs.release.outputs.released == 'true' }}
     runs-on: ${{ matrix.arch == 'aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     timeout-minutes: 15
     container: ${{ matrix.image }}
@@ -392,10 +504,9 @@ jobs:
           - { name: fedora-44-aarch64, image: "fedora:44@sha256:43b29f65a41eb9c35e1cd5323e3bdf3b655c2357a9f4f1ff2f9c2798e5045d80", kind: rpm, arch: aarch64 }
           - { name: debian-trixie-arm64, image: "debian:trixie@sha256:4c25275446ca371766b8b093c696782eabce06263fccacb8d5d813b3dc44b308", kind: deb, arch: aarch64 }
     steps:
-      - name: Checkout release tag
+      - name: Checkout the release commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.release.outputs.tag_name }}
           persist-credentials: false
 
       - name: Fetch the package
@@ -410,7 +521,7 @@ jobs:
         run: |
           if [ -f packaging/signing/repo.asc ]; then
             dnf install -y -q gnupg2
-            packaging/ci/linux-signing.sh check-rpm dist/*.rpm
+            .ci/linux-signing.sh check-rpm dist/*.rpm
           else
             echo "packaging/signing/repo.asc is not committed: the package is unsigned"
           fi
@@ -431,10 +542,11 @@ jobs:
           test -f /usr/lib/systemd/user/plasma-drop.service
 
   # Every asset is hashed and attested after it is built and verified, so SHA256SUMS lists
-  # exactly the signed files that publish-assets uploads.
+  # exactly the signed packages and the crate that upload-draft attaches.
   checksums:
     name: Checksums and provenance
-    needs: [release, sign-linux, verify-linux]
+    needs: [release, sign-linux, verify-linux, crate-package]
+    if: ${{ needs.release.outputs.released == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -444,6 +556,11 @@ jobs:
     env:
       VERSION: ${{ needs.release.outputs.version }}
     steps:
+      - name: Checkout the release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
       - name: Fetch the assets
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -454,15 +571,8 @@ jobs:
       - name: Write checksums
         run: |
           set -euo pipefail
+          mapfile -t expected < <(.ci/release.sh assets "${VERSION}")
           cd release-assets
-          expected=(
-            "plasma-drop-${VERSION}-x86_64-unknown-linux-gnu.tar.gz"
-            "plasma-drop-${VERSION}-aarch64-unknown-linux-gnu.tar.gz"
-            "plasma-drop_${VERSION}_amd64.deb"
-            "plasma-drop_${VERSION}_arm64.deb"
-            "plasma-drop-${VERSION}-1.x86_64.rpm"
-            "plasma-drop-${VERSION}-1.aarch64.rpm"
-          )
           for f in "${expected[@]}"; do
             test -f "${f}" || { echo "::error::${f} is missing"; exit 1; }
             sha256sum -- "${f}" > "${f}.sha256"
@@ -476,91 +586,77 @@ jobs:
           cat SHA256SUMS
 
       - name: Attest build provenance
+        id: attest
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: |
             release-assets/*.tar.gz
             release-assets/*.deb
             release-assets/*.rpm
+            release-assets/*.crate
 
-      # publish-assets merges these with the assets; the name must not match release-*.
+      # One Sigstore bundle covering all 7 files, attached to the release so the provenance can
+      # be checked without GitHub's attestation API (`gh attestation verify --bundle`).
+      # `.intoto.jsonl` is the name Scorecard's releasesHaveProvenance looks for.
+      - name: Keep the provenance bundle
+        env:
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          set -euo pipefail
+          mkdir provenance
+          out="provenance/plasma-drop-${VERSION}.intoto.jsonl"
+          cp -- "${BUNDLE}" "${out}"
+          test "$(grep -c . "${out}")" -eq 1
+          jq -e '.mediaType | startswith("application/vnd.dev.sigstore.bundle")' "${out}" > /dev/null
+
+      # upload-draft merges these with the assets; the names must not match release-*.
+      - name: Keep the provenance bundle artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: provenance
+          retention-days: 7
+          if-no-files-found: error
+          path: provenance/plasma-drop-${{ env.VERSION }}.intoto.jsonl
+
       - name: Keep the checksums
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: checksums
-          retention-days: 1
+          retention-days: 7
           if-no-files-found: error
           path: |
             release-assets/*.sha256
             release-assets/SHA256SUMS
 
-  publish-assets:
-    name: Publish release assets
-    needs: [release, checksums]
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: write
-    steps:
-      - name: Fetch the assets and checksums
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          path: release-assets
-          merge-multiple: true
-
-      - name: Upload to the release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG_NAME: ${{ needs.release.outputs.tag_name }}
-          VERSION: ${{ needs.release.outputs.version }}
-        run: |
-          set -euo pipefail
-          cd release-assets
-          assets=(
-            "plasma-drop-${VERSION}-x86_64-unknown-linux-gnu.tar.gz"
-            "plasma-drop-${VERSION}-aarch64-unknown-linux-gnu.tar.gz"
-            "plasma-drop_${VERSION}_amd64.deb"
-            "plasma-drop_${VERSION}_arm64.deb"
-            "plasma-drop-${VERSION}-1.x86_64.rpm"
-            "plasma-drop-${VERSION}-1.aarch64.rpm"
-          )
-          files=("${assets[@]}" SHA256SUMS)
-          for f in "${assets[@]}"; do files+=("${f}.sha256"); done
-          gh release upload "${TAG_NAME}" "${files[@]}" --repo "${GITHUB_REPOSITORY}" --clobber
-
   packslip:
     name: Sign packslip manifest
-    needs: [release, publish-assets]
+    needs: [release, checksums]
+    if: ${{ needs.release.outputs.released == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # Signing never holds release-write access; publish-packslip uploads the bundle.
+    # Signing never holds release-write access; upload-draft uploads the bundle.
     permissions:
       contents: read
       id-token: write
     steps:
-      # The tag sits on the release-plz version-bump commit, not on github.sha (the push that
-      # triggered this run), so record the commit the tag actually names.
-      - name: Resolve tagged commit
-        id: source
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG_NAME: ${{ needs.release.outputs.tag_name }}
-        run: |
-          set -euo pipefail
-          echo "commit=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${TAG_NAME}" --jq .sha)" >> "${GITHUB_OUTPUT}"
+      - name: Fetch the tarballs
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-linux-tar-*
+          path: dist
+          merge-multiple: true
 
-      # Signs the tarballs already attached to the release, so one manifest covers exactly
-      # what users download, one linux/<arch> entry each. The checksums job attested them,
-      # hence attest: link.
+      # Signs the same tarball bytes upload-draft attaches (a draft is invisible to contents:
+      # read), one linux/<arch> entry each. commit defaults to github.sha, the tagged commit.
+      # The checksums job attested them, hence attest: link.
       - name: Sign packslip manifest
         id: packslip
         uses: jdx/packslip@7d397618045bd98b76cd5cb8177767b2f52789b8 # v1.10.1
         with:
-          download: plasma-drop-*-unknown-linux-gnu.tar.gz
+          artifacts: dist/plasma-drop-*-unknown-linux-gnu.tar.gz
           bin: plasma-drop
           tag: ${{ needs.release.outputs.tag_name }}
           version: ${{ needs.release.outputs.version }}
-          commit: ${{ steps.source.outputs.commit }}
           attest: link
           upload: false
 
@@ -568,80 +664,136 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: packslip-bundle
-          retention-days: 1
+          retention-days: 7
           path: ${{ steps.packslip.outputs.bundle }}
           if-no-files-found: error
 
-  publish-packslip:
-    name: Publish packslip manifest
-    needs: [release, packslip]
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: write
-    steps:
-      - name: Fetch signed bundle
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: packslip-bundle
-          path: packslip
-
-      - name: Upload signed bundle
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG_NAME: ${{ needs.release.outputs.tag_name }}
-        run: |
-          set -euo pipefail
-          test -f packslip/packslip.sigstore.json
-          gh release upload "${TAG_NAME}" packslip/packslip.sigstore.json --repo "${GITHUB_REPOSITORY}" --clobber
-
-  verify-packslip:
-    name: Verify published packslip manifest
-    needs: [release, publish-packslip]
+  # Read-only, before anything is uploaded: the files this run is about to attach must pass the
+  # same checks users run (checksums, packslip with the README pin, build provenance from the
+  # bundle, tied to release.yml on master at this commit).
+  verify-signatures:
+    name: Verify signatures before upload
+    needs: [release, checksums, packslip]
+    if: ${{ needs.release.outputs.released == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: read
     env:
+      VERSION: ${{ needs.release.outputs.version }}
       # Signer fingerprint published in README.md; constant across releases.
       PACKSLIP_PIN: ps1_4yd5vxao3lfzaox72lynxuotke
+      # Only release.yml on master signs; no other workflow or branch.
+      PACKSLIP_IDENTITY: https://github.com/SkeLLLa/plasma-drop/.github/workflows/release.yml@refs/heads/master
     steps:
+      - name: Checkout the release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Fetch the assets, checksums and signatures
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      # The version .mise.toml pins; install-action has no packslip manifest, so it uses
+      # cargo-binstall.
       - name: Install packslip
         uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2.87.30
         with:
-          tool: packslip@1.6.0
+          tool: packslip@1.11.1
 
-      # Check what users download: the public release URLs, not this run's local files.
-      - name: Verify manifest against published tarballs
+      - name: Check checksums, packslip manifest and provenance
         env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mapfile -t assets < <(.ci/release.sh assets "${VERSION}")
+          mapfile -t files < <(.ci/release.sh release-files "${VERSION}")
+          cd release-assets
+          for f in "${files[@]}"; do
+            test -s "${f}" || { echo "::error::${f} is missing"; exit 1; }
+          done
+          sha256sum -c SHA256SUMS
+          for f in "${assets[@]}"; do sha256sum -c "${f}.sha256"; done
+          packslip verify packslip.sigstore.json \
+            --identity "${PACKSLIP_IDENTITY}" \
+            --issuer https://token.actions.githubusercontent.com \
+            --pin "${PACKSLIP_PIN}" \
+            --artifact "plasma-drop-${VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
+            --artifact "plasma-drop-${VERSION}-aarch64-unknown-linux-gnu.tar.gz"
+          for f in "${assets[@]}"; do
+            gh attestation verify "${f}" --bundle "plasma-drop-${VERSION}.intoto.jsonl" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/release.yml" \
+              --source-ref refs/heads/master --source-digest "${GITHUB_SHA}"
+          done
+
+  # Attaches the 17 files to the draft, then downloads the draft again and compares it byte for
+  # byte with what verify-signatures checked. Uploads only ever go to a draft, so a re-run can
+  # replace them; a published (immutable) release is only checked. Runs no third-party code.
+  upload-draft:
+    name: Upload to the draft release
+    needs: [release, verify-signatures]
+    if: ${{ needs.release.outputs.released == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout the release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Fetch the assets, checksums and signatures
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Upload and compare
+        env:
+          GH_TOKEN: ${{ github.token }}
           TAG_NAME: ${{ needs.release.outputs.tag_name }}
           VERSION: ${{ needs.release.outputs.version }}
         run: |
           set -euo pipefail
-          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG_NAME}"
-          args=()
-          for target in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu; do
-            asset="plasma-drop-${VERSION}-${target}.tar.gz"
-            curl -fsSLO --retry 3 "${base}/${asset}"
-            args+=(--artifact "${asset}")
+          R="${GITHUB_REPOSITORY}"
+          .ci/release.sh assert-tag "${TAG_NAME}" "${GITHUB_SHA}"
+          mapfile -t files < <(.ci/release.sh release-files "${VERSION}")
+          for f in "${files[@]}"; do
+            test -s "release-assets/${f}" || { echo "::error::${f} is missing"; exit 1; }
           done
-          curl -fsSLO --retry 3 "${base}/packslip.sigstore.json"
-          packslip verify packslip.sigstore.json \
-            --identity-prefix "https://github.com/${GITHUB_REPOSITORY}/" \
-            --issuer https://token.actions.githubusercontent.com \
-            --pin "${PACKSLIP_PIN}" \
-            "${args[@]}"
+          draft="$(gh release view "${TAG_NAME}" --repo "${R}" --json isDraft --jq .isDraft)"
+          if [ "${draft}" = true ]; then
+            # Remove what an earlier attempt left that isn't in the list, then (re)upload.
+            gh release view "${TAG_NAME}" --repo "${R}" --json assets --jq '.assets[].name' |
+              while IFS= read -r n; do
+                if ! printf '%s\n' "${files[@]}" | grep -qxF -- "${n}"; then
+                  gh release delete-asset "${TAG_NAME}" "${n}" --repo "${R}" --yes
+                fi
+              done
+            gh release upload "${TAG_NAME}" "${files[@]/#/release-assets/}" --repo "${R}" --clobber
+          else
+            echo "::notice::${TAG_NAME} is already published: checking it instead of uploading"
+          fi
+          # What the release now holds must be exactly these bytes.
+          .ci/release.sh check-release "${TAG_NAME}" "${VERSION}" release-assets
 
   # The APT and DNF repositories on GitHub Pages (Settings → Pages → Source: GitHub Actions):
-  # packaging/ci/pages-repo.sh builds them from this run's verified .deb and .rpm plus those of
+  # .ci/pages-repo.sh builds them from this run's verified .deb and .rpm plus those of
   # the 9 releases before it, since each deploy replaces the site. Unsigned until
   # packaging/signing/repo.asc is committed; from then on the metadata and every .rpm are
   # signed with that key, and the release fails without it (docs/distribution.md#linux-signing).
   # PAGES_BASE_URL overrides the URL for a custom domain. This job holds the signing key and
-  # builds the site; `pages` only deploys it.
+  # builds the site before anything is published; `pages` adds the provenance badge and deploys
+  # it, after verify-published.
   repo:
     name: Build APT and DNF repositories
-    needs: [release, publish-assets]
+    needs: [release, checksums]
+    if: ${{ needs.release.outputs.released == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     # Trixie's rpm (4.20, Sequoia) reads a pin with revoked subkeys; the runner's 4.18 can't.
@@ -653,6 +805,8 @@ jobs:
     environment: linux-signing
     permissions:
       contents: read
+    outputs:
+      site-id: ${{ steps.site.outputs.artifact_id }}
     env:
       VERSION: ${{ needs.release.outputs.version }}
       TAG_NAME: ${{ needs.release.outputs.tag_name }}
@@ -663,10 +817,9 @@ jobs:
           apt-get update -qq
           apt-get install -y -qq --no-install-recommends ca-certificates git gh gnupg apt-utils createrepo-c rpm
 
-      - name: Checkout release tag
+      - name: Checkout the release commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ env.TAG_NAME }}
           persist-credentials: false
 
       - name: Fetch this release's packages
@@ -706,10 +859,10 @@ jobs:
           export GNUPGHOME="${RUNNER_TEMP}/gnupg"
           mkdir -m 700 "${GNUPGHOME}"
           trap 'rm -rf "${GNUPGHOME}"' EXIT
-          packaging/ci/linux-signing.sh import
+          .ci/linux-signing.sh import
           owner="${GITHUB_REPOSITORY_OWNER,,}"
           base="${PAGES_BASE_URL:-https://${owner}.github.io/${GITHUB_REPOSITORY#*/}}"
-          packaging/ci/pages-repo.sh assets site "${base}" "${VERSION}"
+          .ci/pages-repo.sh assets site "${base}" "${VERSION}"
 
       - name: Verify the repositories
         run: |
@@ -731,17 +884,253 @@ jobs:
             test -s site/rpm/x86_64/repodata/repomd.xml.asc
             test -s site/rpm/aarch64/repodata/repomd.xml.asc
             grep -qx gpgcheck=1 site/rpm/plasma-drop.repo
-            packaging/ci/linux-signing.sh check-rpm site/rpm/*/*.rpm
+            .ci/linux-signing.sh check-rpm site/rpm/*/*.rpm
           fi
 
-      - name: Upload the site
+      # pages adds the provenance badge after verify-published and deploys it. 30 days, as long
+      # as the run can be re-run (the action's default is 1).
+      - name: Keep the site
+        id: site
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
+          name: pages-site
+          retention-days: 30
           path: site
 
+  # Last checks passed; from here on things become public, in this order: crate, release, Pages.
+  # Publishes exactly the .crate that checksums attested and upload-draft attached, and checks
+  # that crates.io holds it. Idempotent: a version crates.io already has is only checked.
+  publish-crate:
+    name: Publish to crates.io
+    needs: [release, crate-package, upload-draft, repo]
+    if: ${{ needs.release.outputs.released == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Trusted publishing: crates.io trusts release.yml in this repository, only in the crates-io
+    # environment, which only master can deploy to.
+    environment: crates-io
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      VERSION: ${{ needs.release.outputs.version }}
+      CRATE_FILE: plasma-drop-${{ needs.release.outputs.version }}.crate
+    steps:
+      - name: Checkout the release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Outside the checkout: cargo would package an untracked file in it.
+      - name: Fetch the attested crate
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-crate
+          path: ${{ runner.temp }}/attested
+
+      - name: Check crates.io
+        id: crate
+        run: |
+          set -euo pipefail
+          rc=0
+          .ci/release.sh crate-published "${VERSION}" || rc=$?
+          case "${rc}" in
+            0) echo "::notice::plasma-drop ${VERSION} is already on crates.io"; echo "publish=false" >> "${GITHUB_OUTPUT}" ;;
+            1) echo "publish=true" >> "${GITHUB_OUTPUT}" ;;
+            *) echo "::error::could not ask crates.io about ${VERSION}; re-run the failed jobs"; exit 1 ;;
+          esac
+
+      # The Rust version crate-package used, so cargo packages the same bytes.
+      - name: Install Rust toolchain
+        if: ${{ steps.crate.outputs.publish == 'true' }}
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: ${{ needs.crate-package.outputs.rust }}
+
+      # cargo publish packages the crate again: check, before anything is public and before any
+      # token exists, that this gives the attested bytes.
+      - name: Package the crate again
+        if: ${{ steps.crate.outputs.publish == 'true' }}
+        run: |
+          set -euo pipefail
+          cargo package --locked --no-verify
+          cmp -- "target/package/${CRATE_FILE}" "${RUNNER_TEMP}/attested/${CRATE_FILE}"
+
+      # The action revokes the short-lived token in its post step.
+      - name: Authenticate to crates.io (trusted publishing)
+        if: ${{ steps.crate.outputs.publish == 'true' }}
+        id: crates-auth
+        uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
+
+      # --no-verify: crate-package already built the packaged source, so no dependency build
+      # script runs while the token is in the environment. cargo leaves the uploaded file in
+      # target/package/.
+      - name: Publish
+        if: ${{ steps.crate.outputs.publish == 'true' }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.crates-auth.outputs.token }}
+        run: |
+          set -euo pipefail
+          cargo publish --locked --no-verify
+          cmp -- "target/package/${CRATE_FILE}" "${RUNNER_TEMP}/attested/${CRATE_FILE}"
+
+      # Also when an earlier attempt published it.
+      - name: Check crates.io holds the attested crate
+        run: .ci/release.sh crate-check "${VERSION}" "${RUNNER_TEMP}/attested/${CRATE_FILE}" "${GITHUB_SHA}" "${GITHUB_RUN_ID}"
+
+  # The only change it makes is draft → published, with `latest` set by version. With release
+  # immutability on, the release and its assets can't change after this.
+  publish:
+    name: Publish the release
+    needs: [release, publish-crate]
+    if: ${{ needs.release.outputs.released == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout the release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # What verify-signatures checked; the draft is compared with it once more right before
+      # it is published, since repo and publish-crate (environment approvals) may take long.
+      - name: Fetch the assets, checksums and signatures
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Publish the draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ needs.release.outputs.tag_name }}
+          VERSION: ${{ needs.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          R="${GITHUB_REPOSITORY}"
+          .ci/release.sh assert-tag "${TAG_NAME}" "${GITHUB_SHA}"
+          info="$(gh release view "${TAG_NAME}" --repo "${R}" --json databaseId,isDraft --jq '"\(.databaseId) \(.isDraft)"')"
+          read -r id draft <<< "${info}"
+          if [ "${draft}" != true ]; then
+            echo "::notice::${TAG_NAME} is already published"
+            exit 0
+          fi
+          .ci/release.sh check-release "${TAG_NAME}" "${VERSION}" release-assets
+          tags="$(gh api --paginate "repos/${R}/releases?per_page=100" \
+            --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name')"
+          latest="$(.ci/release.sh make-latest "${VERSION}" <<< "${tags}")"
+          # target_commitish only matters if the tag vanished: it pins a recreated tag to this commit.
+          gh api -X PATCH "repos/${R}/releases/${id}" -F draft=false -f make_latest="${latest}" \
+            -f target_commitish="${GITHUB_SHA}" \
+            --jq '"published \(.tag_name), draft=\(.draft), immutable=\(.immutable // "n/a")"'
+          echo "make_latest=${latest}"
+          .ci/release.sh assert-tag "${TAG_NAME}" "${GITHUB_SHA}"
+
+  # After publishing, check what users download (the public release URLs and crates.io, not this
+  # run's files) the way users do. Only if everything passes does it write the provenance badge
+  # that pages deploys; until then Pages keeps the previous release. See docs/distribution.md#recovery.
+  verify-published:
+    name: Verify the published release
+    needs: [release, publish]
+    if: ${{ needs.release.outputs.released == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      attestations: read
+    outputs:
+      badge-id: ${{ steps.badge.outputs.artifact-id }}
+    env:
+      VERSION: ${{ needs.release.outputs.version }}
+      TAG_NAME: ${{ needs.release.outputs.tag_name }}
+      # Signer fingerprint published in README.md; constant across releases.
+      PACKSLIP_PIN: ps1_4yd5vxao3lfzaox72lynxuotke
+      # Only release.yml on master signs; no other workflow or branch.
+      PACKSLIP_IDENTITY: https://github.com/SkeLLLa/plasma-drop/.github/workflows/release.yml@refs/heads/master
+    steps:
+      - name: Checkout the release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install packslip
+        uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2.87.30
+        with:
+          tool: packslip@1.11.1
+
+      - name: Verify the published release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # A release published seconds ago may still 404 on its public URLs, and its release
+          # attestation may not exist yet: retry for up to ~2 minutes before calling it a failure.
+          retry() { local n; for n in 1 2 3 4 5 6; do "$@" && return 0; echo "attempt ${n} failed: $*" >&2; [ "${n}" -lt 6 ] && sleep 20; done; return 1; }
+          R="${GITHUB_REPOSITORY}"
+          W="${R}/.github/workflows/release.yml"
+          d=published
+          crate="plasma-drop-${VERSION}.crate"
+          bundle="${d}/plasma-drop-${VERSION}.intoto.jsonl"
+          mapfile -t assets < <(.ci/release.sh assets "${VERSION}")
+          mapfile -t files < <(.ci/release.sh release-files "${VERSION}")
+          mkdir "${d}" crates-io
+          base="https://github.com/${R}/releases/download/${TAG_NAME}"
+          for f in "${files[@]}"; do retry curl -fsSL --retry 3 -o "${d}/${f}" "${base}/${f}"; done
+          (cd "${d}" && sha256sum -c SHA256SUMS && for f in "${assets[@]}"; do sha256sum -c "${f}.sha256"; done)
+          retry packslip verify "${d}/packslip.sigstore.json" \
+            --identity "${PACKSLIP_IDENTITY}" \
+            --issuer https://token.actions.githubusercontent.com \
+            --pin "${PACKSLIP_PIN}" \
+            --artifact "${d}/plasma-drop-${VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
+            --artifact "${d}/plasma-drop-${VERSION}-aarch64-unknown-linux-gnu.tar.gz"
+          for f in "${assets[@]}"; do
+            # GitHub's attestation API (what users check by default), then the attached bundle.
+            retry gh attestation verify "${d}/${f}" --repo "${R}" \
+              --signer-workflow "${W}" --source-ref refs/heads/master --source-digest "${GITHUB_SHA}"
+            retry gh attestation verify "${d}/${f}" --bundle "${bundle}" --repo "${R}" \
+              --signer-workflow "${W}" --source-ref refs/heads/master --source-digest "${GITHUB_SHA}"
+          done
+          # crates.io serves the attested .crate, with the checksum cargo checks downloads against.
+          retry curl -fsSL --retry 3 -o "crates-io/${crate}" "https://static.crates.io/crates/plasma-drop/${crate}"
+          cmp -- "crates-io/${crate}" "${d}/${crate}"
+          .ci/release.sh crate-check "${VERSION}" "crates-io/${crate}" "${GITHUB_SHA}" "${GITHUB_RUN_ID}"
+          # Immutable releases carry GitHub's own release attestation.
+          immutable="$(retry gh api "repos/${R}/releases/tags/${TAG_NAME}" --jq '.immutable // false')"
+          if [ "${immutable}" = true ]; then
+            retry gh release verify "${TAG_NAME}" --repo "${R}"
+            for f in "${files[@]}"; do
+              retry gh release verify-asset "${TAG_NAME}" "${d}/${f}" --repo "${R}"
+            done
+          else
+            echo "::notice::${TAG_NAME} is not immutable (the repository setting is off): skipping gh release verify"
+          fi
+
+      # Last: written only when every check above passed.
+      - name: Write the provenance badge
+        run: |
+          set -euo pipefail
+          mkdir badge
+          .ci/release.sh provenance-badge "${VERSION}" > badge/provenance-badge.json
+
+      - name: Keep the provenance badge
+        id: badge
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: provenance-badge
+          retention-days: 30
+          if-no-files-found: error
+          path: badge/provenance-badge.json
+
+  # Deploys repo's site with the provenance badge from verify-published, so the badge only ever
+  # names a release that passed it. Skipped when a newer release is already published (a re-run
+  # of an older run), so neither the APT/DNF repositories nor the badge go backwards. Nothing else
+  # deploys Pages.
   pages:
     name: Publish APT and DNF repositories (GitHub Pages)
-    needs: repo
+    needs: [release, repo, verify-published]
+    if: ${{ needs.release.outputs.released == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     concurrency:
@@ -751,12 +1140,75 @@ jobs:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
     permissions:
+      contents: read
       pages: write
       id-token: write
+    env:
+      VERSION: ${{ needs.release.outputs.version }}
     steps:
+      - name: Checkout the release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check no newer release is published
+        id: newest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tags="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name')"
+          newer="$(.ci/release.sh newer-release "${VERSION}" <<< "${tags}")"
+          if [ -n "${newer}" ]; then
+            echo "::notice::${newer} is published and its run deploys Pages: not deploying ${VERSION}"
+            echo "deploy=false" >> "${GITHUB_OUTPUT}"
+          else
+            echo "deploy=true" >> "${GITHUB_OUTPUT}"
+          fi
+
+      # By the IDs repo and verify-published recorded, not by name: an artifact uploaded later
+      # under the same name hides these, and the download fails instead of taking it.
+      - name: Fetch the site
+        if: ${{ steps.newest.outputs.deploy == 'true' }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.repo.outputs.site-id }}
+          path: ${{ runner.temp }}/pages-site
+
+      - name: Fetch the provenance badge
+        if: ${{ steps.newest.outputs.deploy == 'true' }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.verify-published.outputs.badge-id }}
+          path: ${{ runner.temp }}/badge
+
+      - name: Assemble the site
+        if: ${{ steps.newest.outputs.deploy == 'true' }}
+        run: |
+          set -euo pipefail
+          mkdir site
+          tar -xf "${RUNNER_TEMP}/pages-site/artifact.tar" -C site
+          test -s site/index.html
+          cp -- "${RUNNER_TEMP}/badge/provenance-badge.json" site/
+          jq -e --arg m "verified v${VERSION}" '.schemaVersion == 1 and .message == $m' \
+            site/provenance-badge.json > /dev/null
+
       - name: Configure GitHub Pages
+        if: ${{ steps.newest.outputs.deploy == 'true' }}
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
 
+      # One name per attempt, so a re-run doesn't collide with an earlier attempt's artifact.
+      - name: Upload the site
+        if: ${{ steps.newest.outputs.deploy == 'true' }}
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          name: github-pages-${{ github.run_attempt }}
+          path: site
+
       - name: Deploy to GitHub Pages
+        if: ${{ steps.newest.outputs.deploy == 'true' }}
         id: deploy
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+        with:
+          artifact_name: github-pages-${{ github.run_attempt }}

@@ -5,23 +5,23 @@
 # The pin is the primary key, which stays offline; CI holds one signing subkey of it.
 #
 # Usage:
-#   packaging/ci/linux-signing.sh import
+#   .ci/linux-signing.sh import
 #       import REPO_SIGNING_KEY (an unprotected armored secret subkey, from ci-key) into
 #       GNUPGHOME, which must be an empty directory, after checking it against the pin, and
 #       merge the pin itself, so a subkey it revokes can't sign. With neither the pin nor the
 #       key it imports nothing and the release stays unsigned; with only one of them it fails.
 #       Writes LINUX_SIGNED=true|false to GITHUB_ENV when that is set.
-#   packaging/ci/linux-signing.sh ci-key SUBKEY
+#   .ci/linux-signing.sh ci-key SUBKEY
 #       on the maintainer's machine: print the signing subkey SUBKEY (a fingerprint) of the
 #       offline key in GNUPGHOME (default ~/.gnupg) as REPO_SIGNING_KEY wants it, without the
 #       primary's secret and without a passphrase. Reads the passphrase from the terminal.
-#   packaging/ci/linux-signing.sh sign-rpm FILE...
+#   .ci/linux-signing.sh sign-rpm FILE...
 #       sign each .rpm with the imported key, then check-rpm them
-#   packaging/ci/linux-signing.sh check-rpm FILE...
+#   .ci/linux-signing.sh check-rpm FILE...
 #       fail unless each .rpm carries a valid signature by the pinned key (needs only rpmkeys)
 set -eu
 
-PIN="$(cd "$(dirname "$0")/../.." && pwd)/packaging/signing/repo.asc"
+PIN="$(cd "$(dirname "$0")/.." && pwd)/packaging/signing/repo.asc"
 
 die() {
     echo "error: $*" >&2

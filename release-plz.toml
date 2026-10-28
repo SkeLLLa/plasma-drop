@@ -1,9 +1,30 @@
 [workspace]
 changelog_update = true
 git_release_enable = true
+# Drafts: release.yml uploads every asset to the draft, then publishes it (immutable releases).
+git_release_draft = true
+# release.yml's publish job decides `latest` (highest published, non-prerelease version).
+git_release_latest = false
+# release.yml's publish-crate job runs `cargo publish` after every check; release-plz only tags
+# and drafts. `release-plz update` still reads crates.io for the last released version.
+publish = false
 release_always = true
 semver_check = false
 
 [[package]]
 name = "plasma-drop"
 changelog_path = "CHANGELOG.md"
+
+[changelog]
+# The bot's own commits never reach the changelog: a stale bump that was undone and redone,
+# and the local undo commit (release-prepare.yml). The rest is release-plz's default grouping.
+commit_parsers = [
+  { message = "^chore\\(release\\)", skip = true },
+  { message = "^feat", group = "added" },
+  { message = "^changed", group = "changed" },
+  { message = "^deprecated", group = "deprecated" },
+  { message = "^removed", group = "removed" },
+  { message = "^fix", group = "fixed" },
+  { message = "^security", group = "security" },
+  { message = ".*", group = "other" },
+]

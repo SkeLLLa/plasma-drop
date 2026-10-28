@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
-# Tests for scripts/check-action-pins.sh (POSIX sh). Pinned forms pass; every bypass and every
+# Tests for .ci/check-action-pins.sh (POSIX sh). Pinned forms pass; every bypass and every
 # unsupported YAML feature fails, including `uses:` text inside a block scalar.
-# Run with `bats scripts/check-action-pins.bats` (or `make lint-actions`).
+# Run with `bats .ci/check-action-pins.bats` (or `make lint-actions`).
 # Set AWK=<path> to run the checker under a specific awk (the checker calls `awk`; a shim is used).
 
 sha="0123456789abcdef0123456789abcdef01234567"
