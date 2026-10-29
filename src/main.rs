@@ -15,12 +15,15 @@ mod cli;
 mod config;
 mod embedded_assets;
 mod hotkey;
+mod scope;
 mod screen;
+#[cfg(test)]
+mod test_support;
 mod toggle;
 mod wm;
 
 use anyhow::{Context, Result, bail};
-use app_registry::{AppRegistry, ManagedApp};
+use app_registry::{AppRegistry, ManagedApp, RestoreState};
 use clap::Parser;
 use cli::{Cli, Command};
 use config::{Config, default_config_path};
@@ -64,6 +67,11 @@ async fn main() -> Result<()> {
                 print!("{}", embedded_assets::USER_SYSTEMD_SERVICE);
                 return Ok(());
             }
+            Command::LaunchScoped {
+                unit,
+                description,
+                command,
+            } => match scope::launch_scoped(&unit, &description, &command).await? {},
         }
     }
 
@@ -223,8 +231,8 @@ fn build_registry_entries(config: &Config) -> Vec<ManagedApp> {
         .map(|(idx, app)| ManagedApp {
             config: app.clone(),
             tracked_window_id: None,
-            restore_geometry: None,
-            restore_no_border: None,
+            restore: RestoreState::default(),
+            hidden_full_screen: false,
             shortcut_id: format!("{HOTKEY_PREFIX}{}_{}", app.sanitized_name(), idx + 1),
         })
         .collect()

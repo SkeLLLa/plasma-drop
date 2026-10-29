@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand};
+use std::ffi::OsString;
 use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
@@ -36,4 +37,14 @@ pub enum Command {
     },
     PrintExampleConfig,
     PrintSystemdService,
+    /// Runs a command in a new systemd user scope; the daemon starts apps through it.
+    #[command(hide = true)]
+    LaunchScoped {
+        #[arg(long)]
+        unit: String,
+        #[arg(long)]
+        description: String,
+        #[arg(last = true, required = true)]
+        command: Vec<OsString>,
+    },
 }
