@@ -34,6 +34,40 @@ pub enum Minimized {
     No,
 }
 
+/// The maximized and fullscreen state of a window; the default is neither.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WindowModes {
+    #[serde(rename = "maximizedVertically", default)]
+    pub maximized_vertically: bool,
+    #[serde(rename = "maximizedHorizontally", default)]
+    pub maximized_horizontally: bool,
+    #[serde(rename = "fullScreen", default)]
+    pub full_screen: bool,
+}
+
+impl WindowModes {
+    /// Maximized in either direction.
+    pub const fn is_maximized(self) -> bool {
+        self.maximized_vertically || self.maximized_horizontally
+    }
+
+    /// Neither maximized nor fullscreen.
+    pub const fn is_normal(self) -> bool {
+        !self.is_maximized() && !self.full_screen
+    }
+}
+
+/// The outcome of asking a window to leave maximized and fullscreen state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ModesLeft {
+    /// The app acknowledged; the window as it is now.
+    Normal(ManagedWindow),
+    /// The app has not acknowledged in time.
+    Pending,
+    /// The window closed meanwhile.
+    Closed,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Point {
     pub x: i32,
@@ -55,6 +89,10 @@ pub struct ManagedWindow {
     pub frame_geometry: FrameGeometry,
     #[serde(rename = "noBorder")]
     pub no_border: bool,
+    #[serde(default)]
+    pub minimized: bool,
+    #[serde(flatten)]
+    pub modes: WindowModes,
 }
 
 pub fn find_best_match<'a>(
@@ -111,7 +149,7 @@ fn normalize_filename_matcher(filename: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{FrameGeometry, ManagedWindow, find_best_match, matches_window};
+    use super::{FrameGeometry, ManagedWindow, WindowModes, find_best_match, matches_window};
     use crate::config::{AnimationConfig, AppConfig, AttachMode, HideBehavior, PlacementConfig};
     use crate::hotkey::Hotkey;
     use regex::Regex;
@@ -149,6 +187,8 @@ mod tests {
                 height: 50,
             },
             no_border: false,
+            minimized: false,
+            modes: WindowModes::default(),
         }
     }
 

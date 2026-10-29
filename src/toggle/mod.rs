@@ -1,10 +1,10 @@
 use crate::animation::{TransitionPhase, TransitionPlan, WindowState};
-use crate::app_registry::{AppRegistry, ManagedApp};
+use crate::app_registry::{AppRegistry, ManagedApp, RestorePlacement, RestoreState};
 use crate::config::{AppConfig, AttachMode, HideBehavior};
 use crate::screen::{ScreenInfo, hidden_rect_for_screens};
 use crate::wm::{
-    Decorations, FrameGeometry, ManagedWindow, Minimized, Point, WindowManager, WindowUpdate,
-    find_best_match,
+    Decorations, FrameGeometry, ManagedWindow, Minimized, ModesLeft, Point, WindowManager,
+    WindowUpdate, find_best_match,
 };
 use anyhow::{Context, Result, bail};
 use std::collections::HashMap;
@@ -20,6 +20,11 @@ const HOTKEY_DEBOUNCE_WINDOW: Duration = Duration::from_millis(400);
 /// How long to wait for a spawned app's window before giving up.
 const SPAWN_POLL_TIMEOUT: Duration = Duration::from_secs(10);
 const SPAWN_POLL_INTERVAL: Duration = Duration::from_millis(250);
+/// How long to wait for an app to acknowledge leaving maximized or fullscreen state.
+const NORMAL_STATE_TIMEOUT: Duration = Duration::from_secs(1);
+/// How long a just-launched app gets to settle before an instant show re-applies the
+/// placement; an animated show re-applies it when it ends.
+const LAUNCH_SETTLE_DELAY: Duration = Duration::from_millis(150);
 
 /// A `find_or_start` app whose command was spawned; its window has not appeared yet.
 /// Hand it to [`ToggleService::wait_for_launch`] off the event loop.
@@ -42,6 +47,23 @@ fn require_app<'r>(registry: &'r AppRegistry, name: &str) -> Result<&'r ManagedA
     registry
         .managed_app(name)
         .with_context(|| format!("unknown app '{name}'"))
+}
+
+fn require_app_mut<'r>(registry: &'r mut AppRegistry, name: &str) -> Result<&'r mut ManagedApp> {
+    registry
+        .managed_app_mut(name)
+        .with_context(|| format!("unknown app '{name}'"))
+}
+
+/// How a show places its window.
+enum ShowPlacement {
+    /// Animate or move the window into `visible`, starting from `hidden`.
+    Rects {
+        visible: FrameGeometry,
+        hidden: FrameGeometry,
+    },
+    /// Keep the window fullscreen, on `screen`.
+    KeepFullScreen { screen: ScreenInfo },
 }
 
 #[derive(Clone)]
@@ -201,7 +223,7 @@ impl ToggleService {
         match config.attach_mode {
             AttachMode::Find => bail!("no existing window matched app '{}'", config.name),
             AttachMode::FindOrStart => {
-                self.spawn_and_adopt(&config).await?;
+                spawn::spawn_app(&config)?;
                 self.registry.lock().await.mark_launching(app_name);
                 info!("started app '{app_name}'; waiting for its window");
                 Ok(Some(PendingLaunch {
@@ -240,8 +262,23 @@ impl ToggleService {
         if let Some(other) = other_visible {
             self.hide_app(&other, &screens).await?;
         }
-        self.show_window(&app_name, &config, window, &screens, None)
-            .await
+        let internal_id = window.internal_id.clone();
+        let placement = self
+            .show_window(&app_name, &config, window, &screens, None)
+            .await?;
+        // A just-launched app can still override the placement while it restores its own
+        // geometry. An animated show re-applies it when it ends; an instant show does so once
+        // the app had a moment to settle. Toggles wait meanwhile, as they do for an animation.
+        if let ShowPlacement::Rects { visible, .. } = placement
+            && !config.animation.animates()
+        {
+            tokio::time::sleep(LAUNCH_SETTLE_DELAY).await;
+            // Best effort: the show itself already succeeded.
+            if let Err(error) = self.apply_geometry(&internal_id, &visible).await {
+                warn!("could not re-apply the placement of '{app_name}': {error:#}");
+            }
+        }
+        Ok(())
     }
 
     async fn show_window(
@@ -251,42 +288,39 @@ impl ToggleService {
         window: ManagedWindow,
         screens: &[ScreenInfo],
         preferred_screen: Option<ScreenInfo>,
-    ) -> Result<()> {
-        let (visible_rect, hidden_rect) = self
+    ) -> Result<ShowPlacement> {
+        let placement = self
             .prepare_show(app_name, config, &window, screens, preferred_screen)
             .await?;
-        let placed = if let Some(plan) = TransitionPlan::from_config(
-            &config.animation,
-            &visible_rect,
-            &hidden_rect,
-            TransitionPhase::Show,
-        ) {
-            self.run_animation(&window.internal_id, &plan, TransitionPhase::Show)
-                .await
-        } else {
-            self.place_and_raise(&window.internal_id, &visible_rect)
-                .await
+        let placed = match &placement {
+            ShowPlacement::Rects { visible, hidden } => {
+                if let Some(plan) = TransitionPlan::from_config(
+                    &config.animation,
+                    visible,
+                    hidden,
+                    TransitionPhase::Show,
+                ) {
+                    self.run_animation(&window.internal_id, &plan, TransitionPhase::Show)
+                        .await
+                } else {
+                    self.place_and_raise(&window.internal_id, visible).await
+                }
+            }
+            ShowPlacement::KeepFullScreen { screen } => {
+                self.raise_full_screen(&window, screens, screen).await
+            }
         };
 
         // Record the show even when placing failed part-way, so the next press hides the
         // window instead of re-running a show the user already saw start.
-        let mut registry = self.registry.lock().await;
-        if let Some(app) = registry.managed_app_mut(app_name) {
-            let is_new_window =
-                app.tracked_window_id.as_deref() != Some(window.internal_id.as_str());
-            if is_new_window || app.restore_geometry.is_none() {
-                app.restore_geometry = Some(window.frame_geometry);
-            }
-        }
-        registry.record_window(app_name, window.internal_id);
-        registry.mark_visible(app_name);
-        drop(registry);
+        // `prepare_show` already tracks the window.
+        self.registry.lock().await.mark_visible(app_name);
         placed?;
         info!("showed app '{app_name}'");
-        Ok(())
+        Ok(placement)
     }
 
-    /// Readies `window` for a show and returns its visible and hidden rects.
+    /// Readies `window` for a show and returns how to place it.
     async fn prepare_show(
         &self,
         app_name: &str,
@@ -294,8 +328,17 @@ impl ToggleService {
         window: &ManagedWindow,
         screens: &[ScreenInfo],
         preferred_screen: Option<ScreenInfo>,
-    ) -> Result<(FrameGeometry, FrameGeometry)> {
-        if config.hide_behavior == HideBehavior::Minimize {
+    ) -> Result<ShowPlacement> {
+        let registry = self.registry.lock().await;
+        let app = require_app(&registry, app_name)?;
+        // A window the user left fullscreen when it was hidden stays fullscreen, like F11 in
+        // other drop-down apps. Any other maximized or fullscreen state was restored by the
+        // app itself, and KWin pins such a window's size, so it would break the placement.
+        let keep_full_screen =
+            app.tracks(&window.internal_id) && app.hidden_full_screen && window.modes.full_screen;
+        drop(registry);
+        // Un-minimize any minimized window, e.g. a fullscreen one that hiding minimized.
+        if config.hide_behavior == HideBehavior::Minimize || window.minimized {
             self.kwin
                 .minimize_window(&window.internal_id, Minimized::No)
                 .await?;
@@ -305,21 +348,82 @@ impl ToggleService {
                 .move_window_to_current_desktop(&window.internal_id)
                 .await?;
         }
-        if config.hide_decorations {
-            self.hide_window_decorations(app_name, window).await?;
+        let normal_geometry = if keep_full_screen {
+            None
+        } else {
+            self.leave_maximized_and_full_screen(window).await?
+        };
+        require_app_mut(&mut *self.registry.lock().await, app_name)?
+            .take_over(window, normal_geometry);
+        if config.hide_decorations && !window.no_border {
+            self.kwin
+                .set_window_decorations(&window.internal_id, Decorations::Hidden)
+                .await?;
         }
 
         let screen = match preferred_screen {
             Some(screen) => screen,
             None => self.current_screen(config, screens).await?,
         };
+        if keep_full_screen {
+            return Ok(ShowPlacement::KeepFullScreen { screen });
+        }
         screen
             .validate_placement(&config.placement)
             .with_context(|| format!("invalid placement for '{app_name}'"))?;
-        let visible_rect = screen.placement_rect(&config.placement);
-        let hidden_rect =
-            hidden_rect_for_screens(screens, &visible_rect, config.animation.direction);
-        Ok((visible_rect, hidden_rect))
+        let visible = screen.placement_rect(&config.placement);
+        let hidden = hidden_rect_for_screens(screens, &visible, config.animation.direction);
+        Ok(ShowPlacement::Rects { visible, hidden })
+    }
+
+    /// Takes `window` out of maximized and fullscreen state, once the app has acknowledged
+    /// it, and returns its normal geometry, if learned. Placing it earlier is undone: the
+    /// acknowledgement moves the window back to the geometry it had before it was maximized.
+    async fn leave_maximized_and_full_screen(
+        &self,
+        window: &ManagedWindow,
+    ) -> Result<Option<FrameGeometry>> {
+        if window.modes.is_normal() {
+            return Ok(Some(window.frame_geometry));
+        }
+        let internal_id = window.internal_id.as_str();
+        match self
+            .kwin
+            .leave_window_modes(internal_id, NORMAL_STATE_TIMEOUT)
+            .await?
+        {
+            ModesLeft::Normal(current) => Ok(Some(current.frame_geometry)),
+            // Placing it reports the error.
+            ModesLeft::Closed => Ok(None),
+            // An app can leave the state without its geometry changing, which the script
+            // cannot tell apart from not acknowledging yet.
+            ModesLeft::Pending => match self.kwin.window(internal_id).await? {
+                Some(current) if current.modes.is_normal() => Ok(Some(current.frame_geometry)),
+                _ => {
+                    warn!(
+                        "window {internal_id} is still maximized or fullscreen; placing it anyway"
+                    );
+                    Ok(None)
+                }
+            },
+        }
+    }
+
+    /// Shows a window kept fullscreen: on `screen`, raised, without an animation.
+    async fn raise_full_screen(
+        &self,
+        window: &ManagedWindow,
+        screens: &[ScreenInfo],
+        screen: &ScreenInfo,
+    ) -> Result<()> {
+        if Self::screen_for_window(screens, window).name != screen.name {
+            self.kwin
+                .send_window_to_screen(&window.internal_id, &screen.name)
+                .await?;
+        }
+        self.kwin
+            .bring_window_to_foreground(&window.internal_id)
+            .await
     }
 
     async fn place_and_raise(&self, internal_id: &str, geometry: &FrameGeometry) -> Result<()> {
@@ -357,8 +461,21 @@ impl ToggleService {
         window: ManagedWindow,
         screens: &[ScreenInfo],
     ) -> Result<()> {
+        // A window found by matching instead of the tracked one, e.g. after the tracked one
+        // closed, is taken over first so it does not inherit the old window's restore state.
+        let mut registry = self.registry.lock().await;
+        let app = require_app_mut(&mut registry, app_name)?;
+        if !app.tracks(&window.internal_id) {
+            let normal_geometry = window.modes.is_normal().then_some(window.frame_geometry);
+            app.take_over(&window, normal_geometry);
+            app.hidden_full_screen = false;
+        }
+        drop(registry);
         let hidden = self.hide_window(config, &window, screens).await;
         let mut registry = self.registry.lock().await;
+        if let Some(app) = registry.managed_app_mut(app_name) {
+            app.hidden_full_screen = window.modes.full_screen;
+        }
         registry.record_window(app_name, window.internal_id);
         // Mark it hidden even when hiding failed part-way, so the next press shows (and fully
         // re-places) the window instead of trying to hide it again.
@@ -375,12 +492,16 @@ impl ToggleService {
         window: &ManagedWindow,
         screens: &[ScreenInfo],
     ) -> Result<()> {
-        if config.hide_behavior == HideBehavior::Minimize {
+        // KWin pins a fullscreen window's geometry, so it cannot be moved offscreen.
+        if config.hide_behavior == HideBehavior::Minimize || window.modes.full_screen {
             return self
                 .kwin
                 .minimize_window(&window.internal_id, Minimized::Yes)
                 .await;
         }
+        // The same holds for a window the user maximized while it was shown; the next show
+        // would leave maximized state anyway.
+        self.leave_maximized_and_full_screen(window).await?;
 
         let screen = Self::screen_for_window(screens, window);
         let visible_rect = screen.placement_rect(&config.placement);
@@ -543,39 +664,6 @@ impl ToggleService {
             .expect("ToggleService keeps at least one screen")
     }
 
-    async fn hide_window_decorations(&self, app_name: &str, window: &ManagedWindow) -> Result<()> {
-        let mut registry = self.registry.lock().await;
-        let app = registry
-            .managed_app_mut(app_name)
-            .with_context(|| format!("unknown app '{app_name}'"))?;
-        let is_new_window = app.tracked_window_id.as_deref() != Some(window.internal_id.as_str());
-        if is_new_window || app.restore_no_border.is_none() {
-            app.restore_no_border = Some(window.no_border);
-        }
-        drop(registry);
-
-        if !window.no_border {
-            self.kwin
-                .set_window_decorations(&window.internal_id, Decorations::Hidden)
-                .await?;
-        }
-
-        Ok(())
-    }
-
-    /// Spawns `config`'s command and moves it into its own systemd scope.
-    async fn spawn_and_adopt(&self, config: &AppConfig) -> Result<()> {
-        if let Some(pid) = spawn::spawn_app(config)?
-            && let Err(error) = self.kwin.adopt_spawned_process(&config.name, pid).await
-        {
-            warn!(
-                "could not move '{}' into its own systemd scope: {error:#}",
-                config.name
-            );
-        }
-        Ok(())
-    }
-
     /// Polls the window list every `SPAWN_POLL_INTERVAL` for a window matching `config`
     /// until one appears or `SPAWN_POLL_TIMEOUT` passes.
     async fn poll_for_window(&self, config: &AppConfig) -> Result<Option<ManagedWindow>> {
@@ -624,22 +712,31 @@ impl ToggleService {
     pub async fn restore_tracked_windows_on_shutdown(&self) {
         let tracked_windows: Vec<_> = {
             let registry = self.registry.lock().await;
+            let visible = registry.currently_visible_name();
             registry
                 .managed_apps()
                 .filter_map(|app| {
+                    // Hiding minimizes a fullscreen window even when the app hides offscreen.
+                    let minimized_by_hide = app.config.hide_behavior == HideBehavior::Offscreen
+                        && app.hidden_full_screen
+                        && visible != Some(app.config.name.as_str());
                     Some((
                         app.config.name.clone(),
                         app.tracked_window_id.clone()?,
-                        app.restore_geometry,
-                        app.restore_no_border,
+                        app.restore,
+                        if minimized_by_hide {
+                            Minimized::Yes
+                        } else {
+                            Minimized::No
+                        },
                     ))
                 })
                 .collect()
         };
 
-        for (app_name, window_id, restore_geometry, restore_no_border) in tracked_windows {
+        for (app_name, window_id, restore, minimized_by_hide) in tracked_windows {
             if let Err(error) = self
-                .restore_tracked_window(&app_name, &window_id, restore_geometry, restore_no_border)
+                .restore_tracked_window(&app_name, &window_id, restore, minimized_by_hide)
                 .await
             {
                 warn!("failed to restore '{app_name}': {error:#}");
@@ -651,26 +748,37 @@ impl ToggleService {
         &self,
         app_name: &str,
         window_id: &str,
-        restore_geometry: Option<FrameGeometry>,
-        restore_no_border: Option<bool>,
+        restore: RestoreState,
+        minimized_by_hide: Minimized,
     ) -> Result<()> {
-        if self.kwin.window(window_id).await?.is_none() {
+        let Some(window) = self.kwin.window(window_id).await? else {
             return Ok(());
+        };
+
+        // Only a window plasma-drop minimized itself; one the user minimized stays so.
+        if minimized_by_hide == Minimized::Yes && window.minimized {
+            self.kwin.minimize_window(window_id, Minimized::No).await?;
+        }
+        if let Some(RestorePlacement { geometry, modes }) = restore.placement {
+            // Without a learned normal geometry only the state is restored.
+            if let Some(geometry) = geometry {
+                // KWin pins the size of a window the user maximized or made fullscreen.
+                self.leave_maximized_and_full_screen(&window).await?;
+                self.apply_geometry(window_id, &geometry).await?;
+                info!(
+                    "restored app '{}' geometry before shutdown (previous geometry was {}x{} at {},{})",
+                    app_name, geometry.width, geometry.height, geometry.x, geometry.y
+                );
+            }
+            // After the geometry, which becomes the size the window returns to when it
+            // leaves the restored state.
+            if !modes.is_normal() {
+                self.kwin.set_window_modes(window_id, modes).await?;
+                info!("restored app '{app_name}' window state before shutdown ({modes:?})");
+            }
         }
 
-        if let Some(restore_geometry) = restore_geometry {
-            self.apply_geometry(window_id, &restore_geometry).await?;
-            info!(
-                "restored app '{}' geometry before shutdown (previous geometry was {}x{} at {},{})",
-                app_name,
-                restore_geometry.width,
-                restore_geometry.height,
-                restore_geometry.x,
-                restore_geometry.y
-            );
-        }
-
-        if let Some(no_border) = restore_no_border {
+        if let Some(no_border) = restore.no_border {
             let decorations = if no_border {
                 Decorations::Hidden
             } else {

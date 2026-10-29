@@ -53,6 +53,12 @@ If `command` is omitted, spawning falls back to `filename` plus legacy `argument
 
 This split is important for wrapper-based apps such as Flatpak, where launch identity and window identity can differ.
 
+The program must exist when the hotkey is pressed: a name without `/` is looked up on `PATH`, a path is used as given. A missing program fails the hotkey right away instead of waiting for a window that never appears.
+
+With a systemd user session, each started app runs in its own transient scope, named `app-plasma_drop-<name>-<id>.scope`. Stopping or restarting the plasma-drop service then leaves the app, and anything it starts, running. If the scope cannot be created, the app starts anyway and the reason is logged. Without systemd the app is started detached from plasma-drop, which nothing stops along with the daemon.
+
+A just-launched app can still move or resize its window while it restores its own state. plasma-drop applies the placement again when the show animation ends, or about 150 ms after an instant show.
+
 ## Window Decorations
 
 Set `hide_decorations = true` in an `[[app]]` entry to remove the `KWin` title bar and border while plasma-drop controls that window.
@@ -64,6 +70,14 @@ plasma-drop records the window's original decoration state when it attaches and 
 `hide_behavior = "offscreen"` is the default: the window remains running and is parked outside every screen. It is the behavior to use with slide-out animations.
 
 `hide_behavior = "minimize"` uses `KWin` minimization instead. The window is restored before it is shown again, but minimizing hides immediately and skips every hide animation. A `fade` animation can still fade the restored window in. `slide` and `slide-fade` run only on show and may briefly display the restored window at its old position before moving it to the off-screen animation start. Use `offscreen` for symmetric, flicker-free slide animations.
+
+### Maximized and fullscreen windows
+
+`KWin` fixes the size of a maximized or fullscreen window, so plasma-drop takes a window out of either state before placing it, and waits up to a second for the app to confirm. That covers apps that restore a maximized window when they start. A window you maximize while it is shown is un-maximized when it is hidden, and shown at its placement again.
+
+A window you made fullscreen yourself, for example with F11 in a browser, stays fullscreen while you hide and show it. It is minimized on hide whatever `hide_behavior` says, and it is shown without an animation on the target screen. A window that becomes fullscreen while it is hidden is treated as the app restoring its state and is placed normally.
+
+On shutdown, plasma-drop restores each window's original geometry, then its maximized or fullscreen state. When an app never confirmed leaving that state, its normal geometry is unknown and only the state is restored.
 
 Set `hide_on_focus_lost = true` for a drop-down-terminal-style window. plasma-drop listens to `KWin` activation events and hides the app when another window becomes active.
 

@@ -5,8 +5,8 @@ use crate::wm::kwin::types::{
     WindowListResponse, WindowResponse,
 };
 use crate::wm::{
-    Decorations, FrameGeometry, HOTKEY_PREFIX, ManagedWindow, Minimized, Point, WindowManager,
-    WindowUpdate,
+    Decorations, FrameGeometry, HOTKEY_PREFIX, ManagedWindow, Minimized, ModesLeft, Point,
+    WindowManager, WindowModes, WindowUpdate,
 };
 use anyhow::{Context, Result, anyhow, bail};
 use async_trait::async_trait;
@@ -24,7 +24,6 @@ use zbus::export::futures_core::Stream;
 use zbus::{Connection, connection};
 
 use super::dbus_object::PlasmaDropDbusObject;
-use super::systemd;
 
 pub const APP_DBUS_SERVICE: &str = "ua.SkeLLLa.PlasmaDrop";
 pub const APP_DBUS_PATH: &str = "/ua/SkeLLLa/PlasmaDrop";
@@ -38,6 +37,8 @@ const LONG_POLL_TIMEOUT: Duration = Duration::from_secs(20);
 const BRIDGE_FAILURE_THRESHOLD: u32 = 3;
 /// Responder id 0 is reserved for NOOP frames, which the script never answers.
 const NOOP_RESPONDER_ID: u64 = 0;
+/// How many abandoned commands `BridgeState` remembers.
+const MAX_ABANDONED: usize = 32;
 const NOOP_PAYLOAD: &str = r#"{"type":"NOOP","responderId":0,"params":{}}"#;
 
 /// Locks a std mutex, recovering the data if a previous holder panicked.
@@ -51,6 +52,9 @@ pub(crate) struct BridgeState {
     queue: Mutex<VecDeque<(u64, String)>>,
     queue_notify: Notify,
     waiters: Mutex<HashMap<u64, oneshot::Sender<ResponseEnvelope>>>,
+    /// Recent commands whose caller stopped waiting on purpose; a late answer to one is
+    /// expected. Bounded, since the script may never answer some.
+    abandoned: Mutex<VecDeque<u64>>,
     consecutive_timeouts: AtomicU32,
     bridge_failed: Notify,
     long_poll_timeout: Duration,
@@ -73,6 +77,7 @@ impl BridgeState {
             queue: Mutex::new(VecDeque::new()),
             queue_notify: Notify::new(),
             waiters: Mutex::new(HashMap::new()),
+            abandoned: Mutex::new(VecDeque::new()),
             consecutive_timeouts: AtomicU32::new(0),
             bridge_failed: Notify::new(),
             long_poll_timeout,
@@ -95,6 +100,27 @@ impl BridgeState {
     fn forget(&self, id: u64) {
         lock(&self.waiters).remove(&id);
         lock(&self.queue).retain(|(queued_id, _)| *queued_id != id);
+    }
+
+    /// Forgets `id` like [`Self::forget`], and expects a late answer to it.
+    fn abandon(&self, id: u64) {
+        self.forget(id);
+        let mut abandoned = lock(&self.abandoned);
+        if abandoned.len() == MAX_ABANDONED {
+            abandoned.pop_front();
+        }
+        abandoned.push_back(id);
+    }
+
+    /// Whether `id` was abandoned; forgets it if so.
+    fn take_abandoned(&self, id: u64) -> bool {
+        let mut abandoned = lock(&self.abandoned);
+        let position = abandoned
+            .iter()
+            .position(|abandoned_id| *abandoned_id == id);
+        let removed = position.and_then(|index| abandoned.remove(index));
+        drop(abandoned);
+        removed.is_some()
     }
 
     /// Counts a command timeout and signals bridge loss once the threshold is reached.
@@ -135,6 +161,11 @@ impl BridgeState {
             if sender.send(response).is_err() {
                 debug!("response receiver dropped (likely timed out)");
             }
+        } else if self.take_abandoned(response.responder_id) {
+            debug!(
+                "late response for abandoned responder {}",
+                response.responder_id
+            );
         } else {
             warn!(
                 "received response for unknown responder {}",
@@ -143,6 +174,13 @@ impl BridgeState {
         }
         Ok(())
     }
+}
+
+/// The outcome of [`KWinClient::exchange`].
+enum Exchange<T> {
+    Answered(T),
+    /// No answer in time; the responder id the answer would carry.
+    TimedOut(u64),
 }
 
 pub struct KWinClient {
@@ -296,6 +334,46 @@ impl KWinClient {
     where
         T: DeserializeOwned,
     {
+        match self.exchange(command_type, params, COMMAND_TIMEOUT).await? {
+            Exchange::Answered(response) => Ok(response),
+            Exchange::TimedOut(_) => {
+                self.state.record_timeout();
+                bail!("timed out waiting for KWin response to {command_type}");
+            }
+        }
+    }
+
+    /// Sends a command whose answer may legitimately take a while, returning `None` when
+    /// none arrives within `timeout`. Unlike [`Self::send_command`], such a timeout does not
+    /// count towards declaring the bridge dead, and a late answer is expected.
+    async fn send_command_within<T>(
+        &self,
+        command_type: &str,
+        params: Value,
+        timeout: Duration,
+    ) -> Result<Option<T>>
+    where
+        T: DeserializeOwned,
+    {
+        match self.exchange(command_type, params, timeout).await? {
+            Exchange::Answered(response) => Ok(Some(response)),
+            Exchange::TimedOut(responder_id) => {
+                self.state.abandon(responder_id);
+                Ok(None)
+            }
+        }
+    }
+
+    /// Sends a command and waits up to `timeout` for its answer.
+    async fn exchange<T>(
+        &self,
+        command_type: &str,
+        params: Value,
+        timeout: Duration,
+    ) -> Result<Exchange<T>>
+    where
+        T: DeserializeOwned,
+    {
         let responder_id = self.state.allocate_id();
         let payload = serde_json::to_string(&CommandEnvelope {
             command_type,
@@ -309,7 +387,7 @@ impl KWinClient {
         self.state.enqueue(responder_id, payload);
         debug!("queued command {command_type} ({responder_id})");
 
-        let response = match tokio::time::timeout(COMMAND_TIMEOUT, rx).await {
+        let response = match tokio::time::timeout(timeout, rx).await {
             Ok(Ok(response)) => {
                 self.state.record_success();
                 response
@@ -320,8 +398,7 @@ impl KWinClient {
             }
             Err(_) => {
                 self.state.forget(responder_id);
-                self.state.record_timeout();
-                bail!("timed out waiting for KWin response to {command_type}");
+                return Ok(Exchange::TimedOut(responder_id));
             }
         };
 
@@ -330,6 +407,7 @@ impl KWinClient {
         }
 
         serde_json::from_value(response.params)
+            .map(Exchange::Answered)
             .with_context(|| format!("failed to parse response params for {command_type}"))
     }
 }
@@ -407,6 +485,46 @@ impl WindowManager for KWinClient {
         Ok(())
     }
 
+    async fn set_window_modes(&self, internal_id: &str, modes: WindowModes) -> Result<()> {
+        self.send_command::<Value>(
+            "SET_WINDOW_MODES",
+            json!({
+                "internalId": internal_id,
+                "maximizedVertically": modes.maximized_vertically,
+                "maximizedHorizontally": modes.maximized_horizontally,
+                "fullScreen": modes.full_screen,
+            }),
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn leave_window_modes(&self, internal_id: &str, timeout: Duration) -> Result<ModesLeft> {
+        let response: Option<WindowResponse> = self
+            .send_command_within(
+                "LEAVE_WINDOW_MODES",
+                json!({ "internalId": internal_id }),
+                timeout,
+            )
+            .await?;
+        Ok(match response {
+            Some(WindowResponse {
+                window: Some(window),
+            }) => ModesLeft::Normal(window),
+            Some(WindowResponse { window: None }) => ModesLeft::Closed,
+            None => ModesLeft::Pending,
+        })
+    }
+
+    async fn send_window_to_screen(&self, internal_id: &str, screen: &str) -> Result<()> {
+        self.send_command::<Value>(
+            "SEND_WINDOW_TO_SCREEN",
+            json!({ "internalId": internal_id, "screen": screen }),
+        )
+        .await?;
+        Ok(())
+    }
+
     async fn bring_window_to_foreground(&self, internal_id: &str) -> Result<()> {
         self.send_command::<Value>(
             "BRING_WINDOW_TO_FOREGROUND",
@@ -429,10 +547,6 @@ impl WindowManager for KWinClient {
         self.send_command::<Value>("SET_WINDOW_STATE", window_state_params(internal_id, update))
             .await?;
         Ok(())
-    }
-
-    async fn adopt_spawned_process(&self, app_name: &str, pid: u32) -> Result<()> {
-        systemd::move_into_scope(&self.connection, app_name, pid).await
     }
 }
 
@@ -599,7 +713,7 @@ mod helper_tests {
 
 #[cfg(test)]
 mod bridge_state_tests {
-    use super::{BRIDGE_FAILURE_THRESHOLD, BridgeState, NOOP_PAYLOAD, lock};
+    use super::{BRIDGE_FAILURE_THRESHOLD, BridgeState, MAX_ABANDONED, NOOP_PAYLOAD, lock};
     use crate::wm::kwin::types::ResponseEnvelope;
     use std::sync::Arc;
     use std::time::Duration;
@@ -613,6 +727,34 @@ mod bridge_state_tests {
 
     fn test_state() -> BridgeState {
         test_state_with_poll(Duration::from_secs(60))
+    }
+
+    #[test]
+    fn an_abandoned_command_is_forgotten_and_expected_once() {
+        let state = test_state();
+        let (tx, _rx) = oneshot::channel();
+        lock(&state.waiters).insert(7, tx);
+        state.enqueue(7, "leave".to_string());
+
+        state.abandon(7);
+
+        assert!(lock(&state.waiters).is_empty());
+        assert!(lock(&state.queue).is_empty());
+        assert!(state.take_abandoned(7));
+        assert!(!state.take_abandoned(7), "a second answer is unexpected");
+    }
+
+    #[test]
+    fn abandoned_commands_are_bounded() {
+        let state = test_state();
+        let count = u64::try_from(MAX_ABANDONED).unwrap() + 1;
+        for id in 1..=count {
+            state.abandon(id);
+        }
+
+        assert_eq!(lock(&state.abandoned).len(), MAX_ABANDONED);
+        assert!(!state.take_abandoned(1), "the oldest one was dropped");
+        assert!(state.take_abandoned(count));
     }
 
     #[tokio::test]

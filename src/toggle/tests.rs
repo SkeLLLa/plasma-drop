@@ -1,5 +1,5 @@
 use super::{HOTKEY_DEBOUNCE_WINDOW, SPAWN_POLL_TIMEOUT, ToggleService, should_ignore_shortcut};
-use crate::app_registry::{AppRegistry, ManagedApp};
+use crate::app_registry::{AppRegistry, ManagedApp, RestorePlacement, RestoreState};
 use crate::config::{
     AnimationConfig, AnimationDirection, AnimationEasing, AnimationStyle, AppConfig, AttachMode,
     HideBehavior, PlacementConfig, PlacementMetric, PlacementPosition,
@@ -7,7 +7,8 @@ use crate::config::{
 use crate::hotkey::Hotkey;
 use crate::screen::ScreenInfo;
 use crate::wm::{
-    Decorations, FrameGeometry, ManagedWindow, Minimized, Point, WindowManager, WindowUpdate,
+    Decorations, FrameGeometry, ManagedWindow, Minimized, ModesLeft, Point, WindowManager,
+    WindowModes, WindowUpdate,
 };
 use anyhow::{Result, bail};
 use async_trait::async_trait;
@@ -100,8 +101,22 @@ struct MockKWin {
     fail_window_list_from: Option<usize>,
     /// `window_list` reports no windows for this many calls, e.g. until a spawned app opens.
     windows_hidden_for: usize,
-    /// Makes `adopt_spawned_process` fail.
-    fail_adopt: bool,
+    /// When the window acknowledges leaving maximized/fullscreen state.
+    mode_ack: ModeAck,
+    /// Geometry the window takes when it acknowledges leaving maximized/fullscreen state.
+    normal_geometry: Option<FrameGeometry>,
+}
+
+/// When a mock window acknowledges leaving maximized/fullscreen state.
+#[derive(Default)]
+enum ModeAck {
+    #[default]
+    Immediately,
+    /// After this long, like an app that is busy.
+    After(Duration),
+    /// Leaves the state without its geometry changing, which the script cannot report.
+    Unreported,
+    Never,
 }
 
 impl MockKWin {
@@ -160,14 +175,6 @@ impl WindowManager for MockKWin {
         Ok(())
     }
 
-    async fn adopt_spawned_process(&self, app_name: &str, _pid: u32) -> Result<()> {
-        self.calls.lock().await.push(format!("adopt:{app_name}"));
-        if self.fail_adopt {
-            bail!("adopt failed for {app_name}");
-        }
-        Ok(())
-    }
-
     async fn move_window(&self, internal_id: &str, geometry: &FrameGeometry) -> Result<()> {
         if self.fail_moves || self.fails_for(internal_id) {
             bail!("move failed for {internal_id}");
@@ -206,6 +213,56 @@ impl WindowManager for MockKWin {
             .lock()
             .await
             .push(format!("minimized:{internal_id}:{minimized}"));
+        Ok(())
+    }
+
+    async fn set_window_modes(&self, internal_id: &str, modes: WindowModes) -> Result<()> {
+        self.calls.lock().await.push(format!(
+            "modes:{internal_id}:vertical={}:horizontal={}:full_screen={}",
+            modes.maximized_vertically, modes.maximized_horizontally, modes.full_screen
+        ));
+        Ok(())
+    }
+
+    async fn leave_window_modes(&self, internal_id: &str, timeout: Duration) -> Result<ModesLeft> {
+        self.calls
+            .lock()
+            .await
+            .push(format!("leave_modes:{internal_id}"));
+        let delay = match self.mode_ack {
+            ModeAck::Immediately => Duration::ZERO,
+            ModeAck::After(delay) if delay <= timeout => delay,
+            ModeAck::Unreported => {
+                if let Some(window) = self.window.lock().await.as_mut() {
+                    window.modes = WindowModes::default();
+                }
+                tokio::time::sleep(timeout).await;
+                return Ok(ModesLeft::Pending);
+            }
+            ModeAck::After(_) | ModeAck::Never => {
+                tokio::time::sleep(timeout).await;
+                return Ok(ModesLeft::Pending);
+            }
+        };
+        tokio::time::sleep(delay).await;
+        let mut guard = self.window.lock().await;
+        let Some(window) = guard.as_mut() else {
+            return Ok(ModesLeft::Closed);
+        };
+        window.modes = WindowModes::default();
+        if let Some(geometry) = self.normal_geometry {
+            window.frame_geometry = geometry;
+        }
+        let window = window.clone();
+        drop(guard);
+        Ok(ModesLeft::Normal(window))
+    }
+
+    async fn send_window_to_screen(&self, internal_id: &str, screen: &str) -> Result<()> {
+        self.calls
+            .lock()
+            .await
+            .push(format!("screen:{internal_id}:{screen}"));
         Ok(())
     }
 
@@ -250,8 +307,8 @@ fn managed_app(config: AppConfig, tracked_window_id: &str) -> ManagedApp {
         shortcut_id: format!("plasma_drop_hotkey_{}_1", config.sanitized_name()),
         config,
         tracked_window_id: Some(tracked_window_id.into()),
-        restore_geometry: None,
-        restore_no_border: None,
+        restore: RestoreState::default(),
+        hidden_full_screen: false,
     }
 }
 
@@ -278,6 +335,8 @@ fn window(
         caption: caption.into(),
         frame_geometry,
         no_border: false,
+        minimized: false,
+        modes: WindowModes::default(),
     }
 }
 
@@ -549,7 +608,8 @@ async fn toggle_on_hides_decorations_when_configured() {
         .await
         .managed_app("dolphin")
         .unwrap()
-        .restore_no_border;
+        .restore
+        .no_border;
     assert_eq!(restore_no_border, Some(false));
 }
 
@@ -559,8 +619,13 @@ async fn shutdown_restores_original_decoration_state() {
     app.hide_decorations = true;
     let restore_geometry = geometry(10, 20, 300, 400);
     let mut managed = managed_app(app, "{abc}");
-    managed.restore_geometry = Some(restore_geometry);
-    managed.restore_no_border = Some(false);
+    managed.restore = RestoreState {
+        placement: Some(RestorePlacement {
+            geometry: Some(restore_geometry),
+            modes: WindowModes::default(),
+        }),
+        no_border: Some(false),
+    };
     let registry = Arc::new(Mutex::new(AppRegistry::new(vec![managed])));
     let mut tracked_window = window("{abc}", "dolphin", "Dolphin", restore_geometry);
     tracked_window.no_border = true;
@@ -974,7 +1039,7 @@ fn animation(style: AnimationStyle, duration_ms: u16, frame_delay_ms: u16) -> An
 }
 
 #[tokio::test]
-async fn slide_show_resizes_once_and_moves_per_frame() {
+async fn slide_show_sizes_at_setup_and_teardown_and_moves_per_frame() {
     let mut app = app("dolphin", "super+f9", "dolphin");
     app.animation = animation(AnimationStyle::Slide, 32, 16);
     let managed = managed_app(app, "{abc}");
@@ -997,8 +1062,508 @@ async fn slide_show_resizes_once_and_moves_per_frame() {
             "foreground:{abc}".to_string(),
             "move:{abc}:0:-540:1920:1080".to_string(),
             "move:{abc}:0:0:1920:1080".to_string(),
+            // The teardown asserts the visible rect again, size included.
+            "move:{abc}:0:0:1920:1080".to_string(),
+            "resize:{abc}:0:0:1920:1080".to_string(),
         ]
     );
+}
+
+/// The registry of a dolphin app tracking `{abc}`.
+fn dolphin_registry() -> Arc<Mutex<AppRegistry>> {
+    let managed = managed_app(app("dolphin", "super+f9", "dolphin"), "{abc}");
+    Arc::new(Mutex::new(AppRegistry::new(vec![managed])))
+}
+
+/// A dolphin app tracking `{abc}`, and a mock reporting `window`.
+fn tracked_dolphin(window: ManagedWindow) -> (Arc<Mutex<AppRegistry>>, Arc<MockKWin>) {
+    (dolphin_registry(), mock_kwin(Some(window)))
+}
+
+fn position(calls: &[String], prefix: &str) -> usize {
+    calls
+        .iter()
+        .position(|call| call.starts_with(prefix))
+        .unwrap_or_else(|| panic!("no '{prefix}' call in {calls:?}"))
+}
+
+fn has_call(calls: &[String], prefix: &str) -> bool {
+    calls.iter().any(|call| call.starts_with(prefix))
+}
+
+const LEAVE_MODES: &str = "leave_modes:{abc}";
+
+const MAXIMIZED: WindowModes = WindowModes {
+    maximized_vertically: true,
+    maximized_horizontally: true,
+    full_screen: false,
+};
+
+#[tokio::test]
+async fn show_leaves_maximized_or_fullscreen_state_before_placing() {
+    for (maximized, full_screen) in [(true, false), (false, true)] {
+        let mut restored = window("{abc}", "dolphin", "Dolphin", geometry(0, 0, 1920, 1080));
+        restored.modes.maximized_vertically = maximized;
+        restored.modes.maximized_horizontally = maximized;
+        restored.modes.full_screen = full_screen;
+        let (registry, kwin) = tracked_dolphin(restored);
+        let service = ToggleService::new(registry, Arc::<MockKWin>::clone(&kwin), vec![screen()]);
+
+        service.toggle_app("dolphin").await.unwrap();
+
+        let calls = kwin.calls.lock().await.clone();
+        assert!(
+            position(&calls, LEAVE_MODES) < position(&calls, "move:"),
+            "{calls:?}"
+        );
+        assert!(has_call(&calls, "resize:"));
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn show_waits_for_the_app_to_acknowledge_the_normal_state() {
+    let mut maximized = window("{abc}", "dolphin", "Dolphin", geometry(0, 0, 1920, 1080));
+    maximized.modes = MAXIMIZED;
+    let normal = geometry(100, 100, 800, 600);
+    let registry = dolphin_registry();
+    let kwin = Arc::new(MockKWin {
+        window: Mutex::new(Some(maximized)),
+        mode_ack: ModeAck::After(Duration::from_millis(300)),
+        normal_geometry: Some(normal),
+        ..MockKWin::default()
+    });
+    let service = ToggleService::new(
+        Arc::clone(&registry),
+        Arc::<MockKWin>::clone(&kwin),
+        vec![screen()],
+    );
+    let started = tokio::time::Instant::now();
+
+    service.toggle_app("dolphin").await.unwrap();
+
+    assert!(started.elapsed() >= Duration::from_millis(300));
+    // The window is resolved once; the acknowledgement is awaited, not polled for.
+    assert_eq!(kwin.window_requests.load(Ordering::Relaxed), 1);
+    let app = registry
+        .lock()
+        .await
+        .managed_app("dolphin")
+        .unwrap()
+        .clone();
+    // Shutdown restores the normal geometry, then the maximized state.
+    let maximized_modes = MAXIMIZED;
+    assert_eq!(
+        app.restore.placement,
+        Some(RestorePlacement {
+            geometry: Some(normal),
+            modes: maximized_modes,
+        })
+    );
+}
+
+/// Shows a maximized dolphin window whose app acknowledges per `mode_ack`, and returns the
+/// recorded restore placement and the mock.
+async fn show_maximized(mode_ack: ModeAck) -> (RestorePlacement, Arc<MockKWin>) {
+    let mut maximized = window("{abc}", "dolphin", "Dolphin", geometry(0, 0, 1920, 1080));
+    maximized.modes = MAXIMIZED;
+    let registry = dolphin_registry();
+    let kwin = Arc::new(MockKWin {
+        window: Mutex::new(Some(maximized)),
+        mode_ack,
+        ..MockKWin::default()
+    });
+    let service = ToggleService::new(
+        Arc::clone(&registry),
+        Arc::<MockKWin>::clone(&kwin),
+        vec![screen()],
+    );
+    service.toggle_app("dolphin").await.unwrap();
+    let placement = registry
+        .lock()
+        .await
+        .managed_app("dolphin")
+        .unwrap()
+        .restore
+        .placement
+        .unwrap();
+    (placement, kwin)
+}
+
+#[tokio::test(start_paused = true)]
+async fn unacknowledged_leave_places_the_window_without_learning_its_geometry() {
+    let (placement, kwin) = show_maximized(ModeAck::Never).await;
+
+    assert!(has_call(&kwin.calls.lock().await, "resize:"));
+    // The still-maximized rect is not recorded as the normal geometry.
+    assert_eq!(placement.geometry, None);
+    assert!(placement.modes.is_maximized());
+}
+
+#[tokio::test(start_paused = true)]
+async fn unreported_leave_uses_the_unchanged_geometry() {
+    let (placement, _) = show_maximized(ModeAck::Unreported).await;
+
+    assert_eq!(placement.geometry, Some(geometry(0, 0, 1920, 1080)));
+}
+
+#[tokio::test]
+async fn shutdown_restores_a_one_direction_maximize_as_it_was() {
+    let mut managed = managed_app(app("dolphin", "super+f9", "dolphin"), "{abc}");
+    managed.restore.placement = Some(RestorePlacement {
+        geometry: None,
+        modes: WindowModes {
+            maximized_vertically: true,
+            ..WindowModes::default()
+        },
+    });
+    let registry = Arc::new(Mutex::new(AppRegistry::new(vec![managed])));
+    let kwin = mock_kwin(Some(window(
+        "{abc}",
+        "dolphin",
+        "Dolphin",
+        geometry(0, 0, 960, 1080),
+    )));
+    let service = ToggleService::new(registry, Arc::<MockKWin>::clone(&kwin), vec![screen()]);
+
+    service.restore_tracked_windows_on_shutdown().await;
+
+    assert_eq!(
+        *kwin.calls.lock().await,
+        vec!["modes:{abc}:vertical=true:horizontal=false:full_screen=false".to_string()]
+    );
+}
+
+#[tokio::test]
+async fn shutdown_without_a_learned_geometry_only_restores_the_state() {
+    let mut managed = managed_app(app("dolphin", "super+f9", "dolphin"), "{abc}");
+    managed.restore.placement = Some(RestorePlacement {
+        geometry: None,
+        modes: MAXIMIZED,
+    });
+    let registry = Arc::new(Mutex::new(AppRegistry::new(vec![managed])));
+    let kwin = mock_kwin(Some(window(
+        "{abc}",
+        "dolphin",
+        "Dolphin",
+        geometry(0, 0, 1920, 1080),
+    )));
+    let service = ToggleService::new(registry, Arc::<MockKWin>::clone(&kwin), vec![screen()]);
+
+    service.restore_tracked_windows_on_shutdown().await;
+
+    assert_eq!(
+        *kwin.calls.lock().await,
+        vec!["modes:{abc}:vertical=true:horizontal=true:full_screen=false".to_string()]
+    );
+}
+
+#[tokio::test]
+async fn show_skips_state_changes_for_a_normal_window() {
+    let (registry, kwin) = tracked_dolphin(window(
+        "{abc}",
+        "dolphin",
+        "Dolphin",
+        geometry(10, 20, 300, 400),
+    ));
+    let service = ToggleService::new(registry, Arc::<MockKWin>::clone(&kwin), vec![screen()]);
+
+    service.toggle_app("dolphin").await.unwrap();
+
+    assert!(
+        !kwin
+            .calls
+            .lock()
+            .await
+            .iter()
+            .any(|call| call.starts_with("modes:"))
+    );
+}
+
+#[tokio::test]
+async fn fullscreen_the_user_left_on_survives_hide_and_show() {
+    let mut full_screen = window("{abc}", "dolphin", "Dolphin", geometry(0, 0, 1920, 1080));
+    full_screen.modes.full_screen = true;
+    let (registry, kwin) = tracked_dolphin(full_screen);
+    registry.lock().await.mark_visible("dolphin");
+    let service = ToggleService::new(
+        Arc::clone(&registry),
+        Arc::<MockKWin>::clone(&kwin),
+        vec![screen()],
+    );
+
+    service.toggle_app("dolphin").await.unwrap();
+    // KWin pins a fullscreen window's geometry, so it is minimized instead of moved away.
+    assert_eq!(
+        *kwin.calls.lock().await,
+        vec!["minimized:{abc}:true".to_string()]
+    );
+    kwin.window.lock().await.as_mut().unwrap().minimized = true;
+    kwin.calls.lock().await.clear();
+
+    service.toggle_app("dolphin").await.unwrap();
+
+    assert_eq!(
+        *kwin.calls.lock().await,
+        vec![
+            "minimized:{abc}:false".to_string(),
+            "foreground:{abc}".to_string(),
+        ]
+    );
+    assert_eq!(
+        registry.lock().await.currently_visible_name(),
+        Some("dolphin")
+    );
+}
+
+#[tokio::test]
+async fn fullscreen_restored_by_the_app_while_hidden_is_cleared() {
+    let mut full_screen = window("{abc}", "dolphin", "Dolphin", geometry(0, 0, 1920, 1080));
+    full_screen.modes.full_screen = true;
+    // Hidden while normal: hidden_full_screen stays false.
+    let (registry, kwin) = tracked_dolphin(full_screen);
+    let service = ToggleService::new(registry, Arc::<MockKWin>::clone(&kwin), vec![screen()]);
+
+    service.toggle_app("dolphin").await.unwrap();
+
+    let calls = kwin.calls.lock().await.clone();
+    assert!(position(&calls, LEAVE_MODES) < position(&calls, "move:"));
+}
+
+#[tokio::test]
+async fn fullscreen_of_a_newly_taken_over_window_is_cleared() {
+    let mut full_screen = window("{abc}", "dolphin", "Dolphin", geometry(0, 0, 1920, 1080));
+    full_screen.modes.full_screen = true;
+    let (registry, kwin) = tracked_dolphin(full_screen);
+    let mut guard = registry.lock().await;
+    let app = guard.managed_app_mut("dolphin").unwrap();
+    // A previous window of the app was hidden fullscreen; this one is new.
+    app.tracked_window_id = Some("{old}".into());
+    app.hidden_full_screen = true;
+    drop(guard);
+    let service = ToggleService::new(registry, Arc::<MockKWin>::clone(&kwin), vec![screen()]);
+
+    service.toggle_app("dolphin").await.unwrap();
+
+    assert!(has_call(&kwin.calls.lock().await, LEAVE_MODES));
+}
+
+#[tokio::test]
+async fn kept_fullscreen_window_follows_the_target_screen() {
+    let mut full_screen = window("{abc}", "dolphin", "Dolphin", geometry(0, 0, 1920, 1080));
+    full_screen.modes.full_screen = true;
+    full_screen.minimized = true;
+    let (registry, kwin) = tracked_dolphin(full_screen);
+    registry
+        .lock()
+        .await
+        .managed_app_mut("dolphin")
+        .unwrap()
+        .hidden_full_screen = true;
+    // The window is fullscreen on "main"; the cursor is on "top".
+    *kwin.cursor_position.lock().await = Some(Point { x: 500, y: -500 });
+    let service = ToggleService::new(registry, Arc::<MockKWin>::clone(&kwin), stacked_screens());
+
+    service.toggle_app("dolphin").await.unwrap();
+
+    assert_eq!(
+        *kwin.calls.lock().await,
+        vec![
+            "minimized:{abc}:false".to_string(),
+            "screen:{abc}:top".to_string(),
+            "foreground:{abc}".to_string(),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn shutdown_restores_maximized_state_after_the_geometry() {
+    let restore_geometry = geometry(10, 20, 300, 400);
+    let mut managed = managed_app(app("dolphin", "super+f9", "dolphin"), "{abc}");
+    let maximized = MAXIMIZED;
+    managed.restore.placement = Some(RestorePlacement {
+        geometry: Some(restore_geometry),
+        modes: maximized,
+    });
+    let registry = Arc::new(Mutex::new(AppRegistry::new(vec![managed])));
+    let kwin = mock_kwin(Some(window(
+        "{abc}",
+        "dolphin",
+        "Dolphin",
+        restore_geometry,
+    )));
+    let service = ToggleService::new(registry, Arc::<MockKWin>::clone(&kwin), vec![screen()]);
+
+    service.restore_tracked_windows_on_shutdown().await;
+
+    assert_eq!(
+        *kwin.calls.lock().await,
+        vec![
+            "move:{abc}:10:20:300:400".to_string(),
+            "resize:{abc}:10:20:300:400".to_string(),
+            "modes:{abc}:vertical=true:horizontal=true:full_screen=false".to_string(),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn hide_leaves_maximized_state_before_moving_offscreen() {
+    let mut maximized = window("{abc}", "dolphin", "Dolphin", geometry(0, 0, 1920, 1080));
+    maximized.modes = MAXIMIZED;
+    let (registry, kwin) = tracked_dolphin(maximized);
+    registry.lock().await.mark_visible("dolphin");
+    let service = ToggleService::new(registry, Arc::<MockKWin>::clone(&kwin), vec![screen()]);
+
+    service.toggle_app("dolphin").await.unwrap();
+
+    let calls = kwin.calls.lock().await.clone();
+    assert!(
+        position(&calls, LEAVE_MODES) < position(&calls, "move:"),
+        "{calls:?}"
+    );
+    assert!(!has_call(&calls, "minimized:"));
+}
+
+#[tokio::test]
+async fn hiding_a_newly_matched_window_takes_it_over() {
+    // The tracked `{old}` window closed; hiding finds `{abc}` instead.
+    let mut managed = managed_app(app("dolphin", "super+f9", "dolphin"), "{old}");
+    managed.restore.placement = Some(RestorePlacement {
+        geometry: Some(geometry(1, 2, 3, 4)),
+        modes: MAXIMIZED,
+    });
+    managed.hidden_full_screen = true;
+    let registry = Arc::new(Mutex::new(AppRegistry::new(vec![managed])));
+    registry.lock().await.mark_visible("dolphin");
+    let current = geometry(10, 20, 300, 400);
+    // `window` finds nothing for `{old}`; the list holds `{abc}`.
+    let kwin = Arc::new(MockKWin {
+        windows: Mutex::new(vec![window("{abc}", "dolphin", "Dolphin", current)]),
+        ..MockKWin::default()
+    });
+    let service = ToggleService::new(
+        Arc::clone(&registry),
+        Arc::<MockKWin>::clone(&kwin),
+        vec![screen()],
+    );
+
+    service.toggle_app("dolphin").await.unwrap();
+
+    let app = registry
+        .lock()
+        .await
+        .managed_app("dolphin")
+        .unwrap()
+        .clone();
+    assert!(app.tracks("{abc}"));
+    assert_eq!(
+        app.restore.placement,
+        Some(RestorePlacement {
+            geometry: Some(current),
+            modes: WindowModes::default(),
+        })
+    );
+}
+
+#[tokio::test]
+async fn failed_show_keeps_the_original_restore_state() {
+    let mut app = app("dolphin", "super+f9", "dolphin");
+    // Wider than the screen, so the show fails after it took the window over.
+    app.placement.width = PlacementMetric::Pixels(5000);
+    // The tracked id is stale, so `{abc}` is a new window; the mock resolves it anyway.
+    let registry = Arc::new(Mutex::new(AppRegistry::new(vec![managed_app(
+        app, "{old}",
+    )])));
+    let mut maximized = window("{abc}", "dolphin", "Dolphin", geometry(0, 0, 1920, 1080));
+    maximized.modes = MAXIMIZED;
+    let kwin = mock_kwin(Some(maximized));
+    let service = ToggleService::new(
+        Arc::clone(&registry),
+        Arc::<MockKWin>::clone(&kwin),
+        vec![screen()],
+    );
+
+    assert!(service.toggle_app("dolphin").await.is_err());
+    assert!(service.toggle_app("dolphin").await.is_err());
+
+    let restore = registry
+        .lock()
+        .await
+        .managed_app("dolphin")
+        .unwrap()
+        .restore;
+    assert!(
+        restore.placement.unwrap().modes.is_maximized(),
+        "the retry recorded the changed window: {restore:?}"
+    );
+}
+
+#[tokio::test]
+async fn shutdown_leaves_a_state_the_user_chose_before_restoring_geometry() {
+    let restore_geometry = geometry(10, 20, 300, 400);
+    let mut managed = managed_app(app("dolphin", "super+f9", "dolphin"), "{abc}");
+    managed.restore.placement = Some(RestorePlacement {
+        geometry: Some(restore_geometry),
+        modes: WindowModes::default(),
+    });
+    // Hidden while fullscreen, so plasma-drop minimized it.
+    managed.hidden_full_screen = true;
+    let registry = Arc::new(Mutex::new(AppRegistry::new(vec![managed])));
+    let mut full_screen = window("{abc}", "dolphin", "Dolphin", geometry(0, 0, 1920, 1080));
+    full_screen.modes.full_screen = true;
+    full_screen.minimized = true;
+    let kwin = mock_kwin(Some(full_screen));
+    let service = ToggleService::new(registry, Arc::<MockKWin>::clone(&kwin), vec![screen()]);
+
+    service.restore_tracked_windows_on_shutdown().await;
+
+    assert_eq!(
+        *kwin.calls.lock().await,
+        vec![
+            // Hidden fullscreen by an offscreen app, so it was minimized.
+            "minimized:{abc}:false".to_string(),
+            LEAVE_MODES.to_string(),
+            "move:{abc}:10:20:300:400".to_string(),
+            "resize:{abc}:10:20:300:400".to_string(),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn shutdown_keeps_a_window_the_user_minimized_minimized() {
+    let mut managed = managed_app(app("dolphin", "super+f9", "dolphin"), "{abc}");
+    managed.restore.placement = Some(RestorePlacement {
+        geometry: Some(geometry(10, 20, 300, 400)),
+        modes: WindowModes::default(),
+    });
+    let registry = Arc::new(Mutex::new(AppRegistry::new(vec![managed])));
+    let mut minimized = window("{abc}", "dolphin", "Dolphin", geometry(10, 20, 300, 400));
+    minimized.minimized = true;
+    let kwin = mock_kwin(Some(minimized));
+    let service = ToggleService::new(registry, Arc::<MockKWin>::clone(&kwin), vec![screen()]);
+
+    service.restore_tracked_windows_on_shutdown().await;
+
+    assert!(!has_call(&kwin.calls.lock().await, "minimized:"));
+}
+
+#[tokio::test]
+async fn shutdown_keeps_minimize_apps_minimized() {
+    let mut app = app("dolphin", "super+f9", "dolphin");
+    app.hide_behavior = HideBehavior::Minimize;
+    let mut managed = managed_app(app, "{abc}");
+    managed.restore.placement = Some(RestorePlacement {
+        geometry: Some(geometry(10, 20, 300, 400)),
+        modes: WindowModes::default(),
+    });
+    let registry = Arc::new(Mutex::new(AppRegistry::new(vec![managed])));
+    let mut minimized = window("{abc}", "dolphin", "Dolphin", geometry(10, 20, 300, 400));
+    minimized.minimized = true;
+    let kwin = mock_kwin(Some(minimized));
+    let service = ToggleService::new(registry, Arc::<MockKWin>::clone(&kwin), vec![screen()]);
+
+    service.restore_tracked_windows_on_shutdown().await;
+
+    assert!(!has_call(&kwin.calls.lock().await, "minimized:"));
 }
 
 #[tokio::test]
@@ -1065,9 +1630,15 @@ async fn toggle_on_with_other_visible_fetches_screens_once() {
 #[tokio::test]
 async fn shutdown_restore_continues_after_failing_app() {
     let mut broken = managed_app(app("broken", "super+f1", "broken"), "{b1}");
-    broken.restore_geometry = Some(geometry(1, 2, 3, 4));
+    broken.restore.placement = Some(RestorePlacement {
+        geometry: Some(geometry(1, 2, 3, 4)),
+        modes: WindowModes::default(),
+    });
     let mut healthy = managed_app(app("healthy", "super+f2", "healthy"), "{h2}");
-    healthy.restore_geometry = Some(geometry(10, 20, 300, 400));
+    healthy.restore.placement = Some(RestorePlacement {
+        geometry: Some(geometry(10, 20, 300, 400)),
+        modes: WindowModes::default(),
+    });
     let registry = Arc::new(Mutex::new(AppRegistry::new(vec![broken, healthy])));
     let kwin = Arc::new(MockKWin {
         window: Mutex::new(Some(window(
@@ -1207,7 +1778,7 @@ async fn focus_event_for_tracked_window_skips_query() {
 }
 
 #[tokio::test]
-async fn find_or_start_spawn_adopts_process() {
+async fn find_or_start_spawn_makes_no_window_calls() {
     let mut app = app("tool", "super+f3", "true");
     app.attach_mode = AttachMode::FindOrStart;
     let mut managed = managed_app(app, "{g0}");
@@ -1226,7 +1797,7 @@ async fn find_or_start_spawn_adopts_process() {
 
     assert!(toggle_and_wait(&service, "tool").await.is_err());
 
-    assert_eq!(*kwin.calls.lock().await, vec!["adopt:tool".to_string()]);
+    assert!(kwin.calls.lock().await.is_empty());
 }
 
 /// Toggles `app_name` the way the daemon loop does, but waits for a launch inline.
@@ -1273,18 +1844,22 @@ async fn find_or_start_shows_window_that_appears_after_spawn() {
     assert_eq!(
         *kwin.calls.lock().await,
         vec![
-            "adopt:tool".to_string(),
             "move:{new}:0:0:1920:1080".to_string(),
             "resize:{new}:0:0:1920:1080".to_string(),
             "foreground:{new}".to_string(),
+            // An instant show of a just-launched app re-applies the placement once it settled.
+            "move:{new}:0:0:1920:1080".to_string(),
+            "resize:{new}:0:0:1920:1080".to_string(),
         ]
     );
     assert_eq!(registry.lock().await.currently_visible_name(), Some("tool"));
 }
 
 #[tokio::test(start_paused = true)]
-async fn failed_adopt_still_polls_and_shows_the_window() {
-    let registry = Arc::new(Mutex::new(AppRegistry::new(vec![spawnable_app()])));
+async fn animated_launch_is_not_placed_again_after_the_show() {
+    let mut tool = spawnable_app();
+    tool.config.animation = animation(AnimationStyle::Slide, 32, 16);
+    let registry = Arc::new(Mutex::new(AppRegistry::new(vec![tool])));
     let kwin = Arc::new(MockKWin {
         windows: Mutex::new(vec![window(
             "{new}",
@@ -1293,7 +1868,6 @@ async fn failed_adopt_still_polls_and_shows_the_window() {
             geometry(0, 0, 100, 100),
         )]),
         windows_hidden_for: 1,
-        fail_adopt: true,
         ..MockKWin::default()
     });
     let service = ToggleService::new(
@@ -1304,10 +1878,23 @@ async fn failed_adopt_still_polls_and_shows_the_window() {
 
     toggle_and_wait(&service, "tool").await.unwrap();
 
-    assert_eq!(registry.lock().await.currently_visible_name(), Some("tool"));
+    // The animation's teardown is the last placement.
     let calls = kwin.calls.lock().await.clone();
-    assert_eq!(calls.first().map(String::as_str), Some("adopt:tool"));
-    assert!(calls.contains(&"foreground:{new}".to_string()));
+    assert_eq!(
+        calls[calls.len() - 2..],
+        [
+            "move:{new}:0:0:1920:1080".to_string(),
+            "resize:{new}:0:0:1920:1080".to_string(),
+        ]
+    );
+    assert_eq!(
+        calls
+            .iter()
+            .filter(|call| call.starts_with("resize:"))
+            .count(),
+        2,
+        "setup and teardown only: {calls:?}"
+    );
 }
 
 #[tokio::test(start_paused = true)]
@@ -1347,8 +1934,8 @@ async fn press_while_app_is_starting_is_ignored() {
 
     assert!(launch.is_some());
     assert!(second.is_none());
-    // Spawned (and adopted) once; the second press queried nothing.
-    assert_eq!(*kwin.calls.lock().await, vec!["adopt:tool".to_string()]);
+    // Spawned once; the second press queried nothing.
+    assert!(kwin.calls.lock().await.is_empty());
     assert_eq!(kwin.window_list_calls.load(Ordering::Relaxed), 1);
 }
 

@@ -1,14 +1,56 @@
 use crate::config::AppConfig;
-use crate::wm::FrameGeometry;
+use crate::wm::{FrameGeometry, ManagedWindow, WindowModes};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone)]
 pub struct ManagedApp {
     pub config: AppConfig,
     pub tracked_window_id: Option<String>,
-    pub restore_geometry: Option<FrameGeometry>,
-    pub restore_no_border: Option<bool>,
+    pub restore: RestoreState,
+    /// Whether the window was fullscreen when plasma-drop last hid it.
+    pub hidden_full_screen: bool,
     pub shortcut_id: String,
+}
+
+/// How a tracked window looked before plasma-drop took it over; put back on shutdown.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RestoreState {
+    pub placement: Option<RestorePlacement>,
+    pub no_border: Option<bool>,
+}
+
+/// Where a window was and whether it was maximized or fullscreen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RestorePlacement {
+    /// The geometry outside maximized and fullscreen state; `None` when the app never
+    /// confirmed leaving that state, so it was not learned.
+    pub geometry: Option<FrameGeometry>,
+    pub modes: WindowModes,
+}
+
+impl ManagedApp {
+    /// Whether `internal_id` is the window tracked for this app.
+    pub fn tracks(&self, internal_id: &str) -> bool {
+        self.tracked_window_id.as_deref() == Some(internal_id)
+    }
+
+    /// Tracks `window`, first recording how it looked before plasma-drop changes it, unless
+    /// that is already known for this window. `normal_geometry` is its geometry outside
+    /// maximized and fullscreen state, when known. Tracking it right away keeps a show that
+    /// fails part-way from recording the already-changed window as the original next time.
+    pub fn take_over(&mut self, window: &ManagedWindow, normal_geometry: Option<FrameGeometry>) {
+        let is_new_window = !self.tracks(&window.internal_id);
+        if is_new_window || self.restore.placement.is_none() {
+            self.restore.placement = Some(RestorePlacement {
+                geometry: normal_geometry,
+                modes: window.modes,
+            });
+        }
+        if self.config.hide_decorations && (is_new_window || self.restore.no_border.is_none()) {
+            self.restore.no_border = Some(window.no_border);
+        }
+        self.tracked_window_id = Some(window.internal_id.clone());
+    }
 }
 
 #[derive(Debug)]
@@ -100,7 +142,7 @@ impl AppRegistry {
 
 #[cfg(test)]
 mod tests {
-    use super::{AppRegistry, ManagedApp};
+    use super::{AppRegistry, ManagedApp, RestoreState};
     use crate::config::{AnimationConfig, AppConfig, AttachMode, HideBehavior, PlacementConfig};
     use crate::hotkey::Hotkey;
 
@@ -123,8 +165,8 @@ mod tests {
                 animation: AnimationConfig::default(),
             },
             tracked_window_id: None,
-            restore_geometry: None,
-            restore_no_border: None,
+            restore: RestoreState::default(),
+            hidden_full_screen: false,
             shortcut_id: shortcut_id.into(),
         }
     }

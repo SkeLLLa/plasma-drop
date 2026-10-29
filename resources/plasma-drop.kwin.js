@@ -25,6 +25,11 @@ const mapWindow = (window) => ({
         height: Math.round(window.frameGeometry.height),
     },
     noBorder: Boolean(window.noBorder),
+    minimized: Boolean(window.minimized),
+    // KWin's MaximizeMode: 1 vertical, 2 horizontal, 3 both.
+    maximizedVertically: Boolean(window.maximizeMode & 1),
+    maximizedHorizontally: Boolean(window.maximizeMode & 2),
+    fullScreen: Boolean(window.fullScreen),
 });
 
 kwin.getWindows = () => workspace.windowList();
@@ -46,6 +51,17 @@ kwin.getWindowByInternalIdRequired = (internalId) => {
         throw new Error(`No window found with internal id ${internalId}`);
     }
     return window;
+};
+
+kwin.getScreenByNameRequired = (name) => {
+    // Array.from also accepts the array-like list wrapper QJSEngine may hand out.
+    const screen = Array.from(workspace.screens || []).find(
+        (output) => String(output.name || "") === name
+    );
+    if (!screen) {
+        throw new Error(`No screen named '${name}'`);
+    }
+    return screen;
 };
 
 bridge.DBUS_SERVICE = "ua.SkeLLLa.PlasmaDrop";
@@ -100,6 +116,9 @@ bridge.sendResponse = (cmdInfo, params, exceptionMessage) => {
 
 const errorMessage = (error) => String(error && error.message ? error.message : error);
 
+// Returned by a command that sends its response later itself.
+bridge.DEFERRED = {};
+
 bridge.onGotCommand = (cmdInfoStr) => {
     // Always re-arm the long poll, even when parsing or replying throws; otherwise the
     // bridge stops for good and the daemon only notices through command timeouts.
@@ -114,8 +133,10 @@ bridge.onGotCommand = (cmdInfoStr) => {
         if (typeof cmd !== "function") {
             throw new Error(`Unknown command '${cmdInfo.type}'`);
         }
-        const params = cmd(cmdInfo.params || {}) || {};
-        bridge.sendResponse(cmdInfo, params, null);
+        const params = cmd(cmdInfo.params || {}, cmdInfo) || {};
+        if (params !== bridge.DEFERRED) {
+            bridge.sendResponse(cmdInfo, params, null);
+        }
     } catch (error) {
         try {
             log.error(errorMessage(error));
@@ -219,6 +240,101 @@ cmds["SET_WINDOW_STATE"] = (params) => {
 cmds["SET_WINDOW_NO_BORDER"] = (params) => {
     const window = kwin.getWindowByInternalIdRequired(params.internalId);
     window.noBorder = Boolean(params.noBorder);
+    return {};
+};
+// KWin pins a maximized or fullscreen window's size, so placing one only moves it. On
+// Wayland both changes complete once the app acknowledges them. Fullscreen is left before
+// and entered after the maximize change, so the maximize applies to the normal window.
+cmds["SET_WINDOW_MODES"] = (params) => {
+    const window = kwin.getWindowByInternalIdRequired(params.internalId);
+    const vertically = Boolean(params.maximizedVertically);
+    const horizontally = Boolean(params.maximizedHorizontally);
+    const fullScreen = Boolean(params.fullScreen);
+    if (!fullScreen) {
+        window.fullScreen = false;
+    }
+    window.setMaximize(vertically, horizontally);
+    if (fullScreen) {
+        window.fullScreen = true;
+    }
+    return {};
+};
+// Pending LEAVE_WINDOW_MODES replies by window id, each a function that drops the wait.
+const modeLeaves = {};
+// Longer than the daemon waits; an older wait is dropped on its window's next signal.
+const MODE_LEAVE_EXPIRY_MS = 2000;
+const isNormal = (window) => !window.maximizeMode && !window.fullScreen;
+const sameRect = (a, b) =>
+    Math.round(a.x) === Math.round(b.x) &&
+    Math.round(a.y) === Math.round(b.y) &&
+    Math.round(a.width) === Math.round(b.width) &&
+    Math.round(a.height) === Math.round(b.height);
+
+// Leaves maximized and fullscreen state and answers once the app has acknowledged it: the
+// state is normal and the window has left the pinned rect. Both are reported separately,
+// in either order. The bridge keeps polling meanwhile; the daemon stops waiting after its
+// own timeout, and a later answer is dropped.
+cmds["LEAVE_WINDOW_MODES"] = (params, cmdInfo) => {
+    const window = kwin.getWindowByInternalIdRequired(params.internalId);
+    if (isNormal(window)) {
+        return { window: mapWindow(window) };
+    }
+    const id = params.internalId;
+    if (modeLeaves[id]) {
+        modeLeaves[id]();
+    }
+    // Copied field by field: a QRectF's fields need not be own enumerable properties.
+    const g = window.frameGeometry;
+    const pinned = { x: g.x, y: g.y, width: g.width, height: g.height };
+    const expiresAt = Date.now() + MODE_LEAVE_EXPIRY_MS;
+    // Answers at most once, even when X11 applies the change synchronously inside a setter.
+    let done = false;
+    const check = () => {
+        if (done) {
+            return;
+        }
+        if (Date.now() > expiresAt) {
+            stop();
+        } else if (isNormal(window) && !sameRect(window.frameGeometry, pinned)) {
+            stop();
+            bridge.sendResponse(cmdInfo, { window: mapWindow(window) }, null);
+        }
+    };
+    const removed = (closed) => {
+        if (!done && closed === window) {
+            stop();
+            bridge.sendResponse(cmdInfo, { window: null }, null);
+        }
+    };
+    const stop = () => {
+        done = true;
+        window.maximizedChanged.disconnect(check);
+        window.fullScreenChanged.disconnect(check);
+        window.frameGeometryChanged.disconnect(check);
+        workspace.windowRemoved.disconnect(removed);
+        delete modeLeaves[id];
+    };
+    window.maximizedChanged.connect(check);
+    window.fullScreenChanged.connect(check);
+    window.frameGeometryChanged.connect(check);
+    workspace.windowRemoved.connect(removed);
+    modeLeaves[id] = stop;
+    try {
+        window.fullScreen = false;
+        window.setMaximize(false, false);
+    } catch (error) {
+        // onGotCommand answers with the error; nothing may answer later.
+        stop();
+        throw error;
+    }
+    // X11 applies both at once.
+    check();
+    return bridge.DEFERRED;
+};
+// Moves a window to the named output; KWin refits a fullscreen window to it.
+cmds["SEND_WINDOW_TO_SCREEN"] = (params) => {
+    const window = kwin.getWindowByInternalIdRequired(params.internalId);
+    workspace.sendClientToScreen(window, kwin.getScreenByNameRequired(params.screen));
     return {};
 };
 cmds["MINIMIZE_WINDOW"] = (params) => {
