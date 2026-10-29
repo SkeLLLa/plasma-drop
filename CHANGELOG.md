@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.16.0](https://github.com/SkeLLLa/plasma-drop/compare/v1.15.0...v1.16.0) - 2026-10-29
+
+### Added
+
+- handle maximized and fullscreen windows
+
+### Fixed
+
+- launch apps in their own systemd scope
+- re-apply placement at end of show
+
 ## [1.15.0](https://github.com/SkeLLLa/plasma-drop/compare/v1.14.2...v1.15.0) - 2026-10-28
 
 ### Added
