@@ -370,6 +370,11 @@ impl PlacementConfig {
 }
 
 impl AnimationConfig {
+    /// Whether shows and hides are animated at all.
+    pub const fn animates(&self) -> bool {
+        !matches!(self.style, AnimationStyle::None) && self.duration_ms > 0
+    }
+
     fn from_raw(raw: Option<&RawAnimationConfig>, app_name: &str) -> Result<Self> {
         let Some(raw) = raw else {
             return Ok(Self::default());

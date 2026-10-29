@@ -43,7 +43,7 @@ impl TransitionPlan {
         hidden: &FrameGeometry,
         phase: TransitionPhase,
     ) -> Option<Self> {
-        if matches!(config.style, AnimationStyle::None) || config.duration_ms == 0 {
+        if !config.animates() {
             return None;
         }
 
@@ -59,6 +59,9 @@ impl TransitionPlan {
 
         match phase {
             TransitionPhase::Show => {
+                // A just-launched app can still override the setup resize while it restores
+                // its own geometry, so the show ends by asserting the visible rect again.
+                teardown.geometry = Some(*visible);
                 if uses_geometry_track(config.style) {
                     setup.geometry = Some(*hidden);
                     keyframes.push(KeyframeTrack::Geometry {
@@ -211,6 +214,24 @@ mod tests {
             y: -1080,
             width: 960,
             height: 1080,
+        }
+    }
+
+    #[test]
+    fn show_reasserts_the_visible_rect_at_the_end() {
+        for style in [
+            AnimationStyle::Fade,
+            AnimationStyle::Slide,
+            AnimationStyle::SlideFade,
+        ] {
+            let config = AnimationConfig {
+                style,
+                ..AnimationConfig::default()
+            };
+            let plan =
+                TransitionPlan::from_config(&config, &visible(), &hidden(), TransitionPhase::Show)
+                    .unwrap();
+            assert_eq!(plan.teardown_state().geometry, Some(visible()), "{style:?}");
         }
     }
 
