@@ -119,12 +119,40 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           save-if: ${{ github.ref == 'refs/heads/master' }}
-      # `make check` minus lint-deny, which the deny job runs with cargo-deny installed.
+      # mise 2026.10.14, pinned by checksum. mise.lock pins the tools (the action adds --locked).
+      - name: Install cccc (version from .mise.toml)
+        uses: jdx/mise-action@9b200bcecbfd6303e69a4a261b2e09e3757440a7 # v5.2.0
+        with:
+          version: 2026.10.14
+          sha256: 50be7185bcf75929f01cc5630276bcb43ca367f7c5b176e2580903d28c611dc4
+          install_args: github:moznion/cccc
+          cache: false
+      # `make check` minus lint-deny and lint-js, which the deny and kwin-script jobs run.
       - name: Run quality checks
-        run: make fmt-check clippy test doc
+        run: make fmt-check clippy test doc lint-complexity
       # What crates.io would get, built from the packaged sources (Cargo.toml exclude).
       - name: Package the crate
         run: cargo package --locked
+
+  # `make lint-js` through fallow's action, for its annotations and job summary. release.yml
+  # runs the mise-installed binary instead: the action caches, and release workflows don't.
+  kwin-script:
+    name: KWin script analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Run fallow (version from .mise.toml)
+        uses: fallow-rs/fallow@85fa32733e951df85966842f2bb6a3f2720a940c # v3.37.0
+        with:
+          version: 3.37.0
+          config: fallow.toml
+          # The whole script, like `make lint-js`, not only a PR's changed files.
+          auto-changed-since: false
 
   msrv:
     name: MSRV build (1.89)
