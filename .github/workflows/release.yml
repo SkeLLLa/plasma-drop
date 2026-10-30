@@ -100,14 +100,14 @@ jobs:
 
       # `make check` includes lint-deny; same version as ci.yml's deny job and .mise.toml.
       - name: Install cargo-deny
-        uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2.87.30
+        uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
         with:
           tool: cargo-deny@0.20.2
 
       # `make check` includes lint-complexity and lint-js. mise 2026.10.14, pinned by checksum;
       # mise.lock pins the tools (the action adds --locked).
       - name: Install cccc and fallow (versions from .mise.toml)
-        uses: jdx/mise-action@9b200bcecbfd6303e69a4a261b2e09e3757440a7 # v5.2.0
+        uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
         with:
           version: 2026.10.14
           sha256: 50be7185bcf75929f01cc5630276bcb43ca367f7c5b176e2580903d28c611dc4
@@ -675,7 +675,7 @@ jobs:
       # The checksums job attested them, hence attest: link.
       - name: Sign packslip manifest
         id: packslip
-        uses: jdx/packslip@7d397618045bd98b76cd5cb8177767b2f52789b8 # v1.10.1
+        uses: jdx/packslip@ddcddd9c8c33977d2d08d5db91caec579da59aab # v1.11.0
         with:
           artifacts: dist/plasma-drop-*-unknown-linux-gnu.tar.gz
           bin: plasma-drop
@@ -724,7 +724,7 @@ jobs:
       # The version .mise.toml pins; install-action has no packslip manifest, so it uses
       # cargo-binstall.
       - name: Install packslip
-        uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2.87.30
+        uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
         with:
           tool: packslip@1.11.1
 
@@ -1081,7 +1081,7 @@ jobs:
           persist-credentials: false
 
       - name: Install packslip
-        uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2.87.30
+        uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
         with:
           tool: packslip@1.11.1
 
