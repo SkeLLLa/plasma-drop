@@ -15,6 +15,7 @@ mod cli;
 mod config;
 mod embedded_assets;
 mod hotkey;
+mod notify;
 mod scope;
 mod screen;
 #[cfg(test)]
@@ -33,9 +34,9 @@ use std::sync::Arc;
 use toggle::ToggleService;
 use tokio::sync::Mutex;
 use tokio::task::JoinSet;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
-use wm::kwin::client::KWinClient;
+use wm::kwin::client::{HotkeyStatus, KWinClient};
 use wm::kwin::script::ensure_script_file;
 use wm::{HOTKEY_PREFIX, WindowManager};
 
@@ -103,6 +104,7 @@ async fn main() -> Result<()> {
     }
 
     let managed_apps = build_registry_entries(&config);
+    let mut hotkey_problems = Vec::new();
     for app in &managed_apps {
         kwin.register_hotkey(
             &app.shortcut_id,
@@ -115,6 +117,27 @@ async fn main() -> Result<()> {
             hotkey = %app.config.hotkey.sequence(),
             app = %app.config.name,
             "registered hotkey"
+        );
+        match kwin.hotkey_status(&app.shortcut_id).await {
+            Ok(status) => {
+                if let Some(problem) =
+                    hotkey_problem(&app.config.name, app.config.hotkey.raw(), &status)
+                {
+                    error!("{problem}");
+                    hotkey_problems.push(problem);
+                }
+            }
+            Err(error) => warn!(
+                "failed to check hotkey for '{}': {error:#}",
+                app.config.name
+            ),
+        }
+    }
+    if !hotkey_problems.is_empty() {
+        notify::spawn(
+            kwin.connection().clone(),
+            "Some plasma-drop hotkeys don't work".to_string(),
+            hotkey_problems.join("\n\n"),
         );
     }
     let registry = Arc::new(Mutex::new(AppRegistry::new(managed_apps)));
@@ -238,6 +261,28 @@ fn build_registry_entries(config: &Config) -> Vec<ManagedApp> {
         .collect()
 }
 
+/// Why an app's hotkey does not fire, for the log and a desktop notification.
+fn hotkey_problem(app: &str, hotkey: &str, status: &HotkeyStatus) -> Option<String> {
+    match status {
+        HotkeyStatus::Active => None,
+        HotkeyStatus::NotAccepted => Some(format!(
+            "Hotkey '{hotkey}' for '{app}' doesn't work: KWin didn't accept it."
+        )),
+        HotkeyStatus::Shadowed(rivals) => {
+            let rivals = rivals
+                .iter()
+                .map(|rival| format!("'{}' ({})", rival.action, rival.component))
+                .collect::<Vec<_>>()
+                .join(", ");
+            Some(format!(
+                "Hotkey '{hotkey}' for '{app}' doesn't work while {rivals} uses the same key. \
+                 Remove it there in System Settings > Keyboard > Shortcuts; plasma-drop picks \
+                 up the change without a restart."
+            ))
+        }
+    }
+}
+
 /// Whether `init` also writes the user systemd unit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SystemdUnit {
@@ -321,4 +366,33 @@ fn shutdown_signal() -> Result<impl Future<Output = Result<()>>> {
             _ = terminate => Ok(()),
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::hotkey_problem;
+    use crate::wm::kwin::client::{HotkeyStatus, RivalShortcut};
+
+    #[test]
+    fn active_hotkey_has_no_problem() {
+        assert_eq!(hotkey_problem("term", "super", &HotkeyStatus::Active), None);
+    }
+
+    #[test]
+    fn shadowed_hotkey_names_the_rival() {
+        let status = HotkeyStatus::Shadowed(vec![RivalShortcut {
+            action: "Activate Application Launcher".into(),
+            component: "plasmashell".into(),
+        }]);
+        let problem = hotkey_problem("term", "super", &status).unwrap();
+        assert!(problem.starts_with("Hotkey 'super' for 'term' doesn't work while"));
+        assert!(problem.contains("'Activate Application Launcher' (plasmashell)"));
+        assert!(problem.contains("System Settings > Keyboard > Shortcuts"));
+    }
+
+    #[test]
+    fn rejected_hotkey_says_so() {
+        let problem = hotkey_problem("term", "super", &HotkeyStatus::NotAccepted).unwrap();
+        assert!(problem.contains("KWin didn't accept it"));
+    }
 }

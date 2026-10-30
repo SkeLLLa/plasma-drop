@@ -1,10 +1,45 @@
 use anyhow::{Result, anyhow, bail};
-use std::collections::HashSet;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Hotkey {
     raw: String,
     sequence: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Modifier {
+    Shift,
+    Ctrl,
+    Alt,
+    Meta,
+}
+
+impl Modifier {
+    fn parse(token: &str) -> Option<Self> {
+        match token.to_ascii_lowercase().as_str() {
+            "ctrl" | "control" => Some(Self::Ctrl),
+            "shift" => Some(Self::Shift),
+            "alt" => Some(Self::Alt),
+            "super" | "meta" | "win" => Some(Self::Meta),
+            _ => None,
+        }
+    }
+
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Shift => "Shift",
+            Self::Ctrl => "Ctrl",
+            Self::Alt => "Alt",
+            Self::Meta => "Meta",
+        }
+    }
+
+    /// Whether a tap of this modifier on its own may be a hotkey. Ctrl and Shift are held
+    /// alone too often, around clicks, drags and input method switches, and `KWin` fires a
+    /// modifier tap on any such release.
+    const fn taps_alone(self) -> bool {
+        matches!(self, Self::Alt | Self::Meta)
+    }
 }
 
 impl Hotkey {
@@ -32,27 +67,42 @@ impl Hotkey {
             bail!("hotkey '{raw}' has no key");
         };
 
-        let mut seen = HashSet::new();
         let mut modifiers = Vec::new();
         for token in modifier_tokens {
-            let normalized = match token.to_ascii_lowercase().as_str() {
-                "ctrl" => "Ctrl",
-                "shift" => "Shift",
-                "alt" => "Alt",
-                "super" | "meta" | "win" => "Meta",
-                unknown => bail!("unknown hotkey modifier '{unknown}' in '{raw}'"),
+            let Some(modifier) = Modifier::parse(token) else {
+                bail!(
+                    "unknown hotkey modifier '{}' in '{raw}'",
+                    token.to_ascii_lowercase()
+                );
             };
-
-            if !seen.insert(normalized.to_string()) {
+            if modifiers.contains(&modifier) {
                 bail!("duplicate hotkey modifier '{token}' in '{raw}'");
             }
+            modifiers.push(modifier);
+        }
 
-            modifiers.push(normalized.to_string());
+        if let Some(modifier) = Modifier::parse(key) {
+            if !modifiers.is_empty() {
+                bail!(
+                    "hotkey '{raw}' has no key; a modifier-only hotkey must be a single modifier"
+                );
+            }
+            if !modifier.taps_alone() {
+                bail!("hotkey '{raw}' can't be used alone; only super and alt can");
+            }
+            return Ok(Self {
+                sequence: modifier.name().to_string(),
+                raw,
+            });
         }
 
         let key = normalize_key(key, &raw)?;
-        modifiers.push(key);
-        let sequence = modifiers.join("+");
+        let sequence = modifiers
+            .iter()
+            .map(|modifier| modifier.name())
+            .chain([key.as_str()])
+            .collect::<Vec<_>>()
+            .join("+");
 
         Ok(Self { raw, sequence })
     }
@@ -134,6 +184,48 @@ mod tests {
         let hotkey = Hotkey::parse("F12").unwrap();
         assert_eq!(hotkey.sequence(), "F12");
     }
+
+    #[test]
+    fn parses_control_alias_in_combo() {
+        let hotkey = Hotkey::parse("control+k").unwrap();
+        assert_eq!(hotkey.sequence(), "Ctrl+K");
+    }
+
+    #[test]
+    fn parses_modifier_only_hotkeys() {
+        for (input, sequence) in [
+            ("super", "Meta"),
+            ("META", "Meta"),
+            ("win", "Meta"),
+            ("alt", "Alt"),
+            (" alt ", "Alt"),
+        ] {
+            let hotkey = Hotkey::parse(input).unwrap();
+            assert_eq!(hotkey.sequence(), sequence, "{input}");
+        }
+    }
+
+    #[test]
+    fn rejects_ctrl_and_shift_alone() {
+        for input in ["ctrl", "control", "shift"] {
+            let err = Hotkey::parse(input).unwrap_err();
+            assert!(err.to_string().contains("can't be used alone"), "{input}");
+        }
+    }
+
+    #[test]
+    fn rejects_modifier_only_chord() {
+        let err = Hotkey::parse("ctrl+shift").unwrap_err();
+        assert!(err.to_string().contains("single modifier"));
+        assert!(Hotkey::parse("super+super").is_err());
+    }
+
+    #[test]
+    fn rejects_side_specific_modifiers() {
+        assert!(Hotkey::parse("rctrl").is_err());
+        assert!(Hotkey::parse("rctrl+k").is_err());
+    }
+
     #[test]
     fn parses_twosuperior_hotkey() {
         let hotkey1 = Hotkey::parse("ctrl+²").unwrap();

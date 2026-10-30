@@ -1,5 +1,7 @@
 use crate::screen::ScreenInfo;
-use crate::wm::kwin::proxies::{KGlobalAccelComponentProxy, KGlobalAccelProxy, KWinScriptingProxy};
+use crate::wm::kwin::proxies::{
+    KGlobalAccelComponentProxy, KGlobalAccelProxy, KWinScriptingProxy, ShortcutInfo,
+};
 use crate::wm::kwin::types::{
     CommandEnvelope, CursorPositionResponse, ResponseEnvelope, ScreenEntry, ScreensResponse,
     WindowListResponse, WindowResponse,
@@ -40,6 +42,63 @@ const NOOP_RESPONDER_ID: u64 = 0;
 /// How many abandoned commands `BridgeState` remembers.
 const MAX_ABANDONED: usize = 32;
 const NOOP_PAYLOAD: &str = r#"{"type":"NOOP","responderId":0,"params":{}}"#;
+
+/// `Qt::Key_unknown`, which Qt yields for a key name it does not know.
+const QT_KEY_UNKNOWN: i32 = 0x01ff_ffff;
+/// The key bits of a Qt key combination; the bits above hold the modifiers.
+const QT_KEY_MASK: i32 = 0x01ff_ffff;
+
+/// What `KGlobalAccel` made of a registered hotkey.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HotkeyStatus {
+    /// It fires.
+    Active,
+    /// No usable key was stored, so it never fires.
+    NotAccepted,
+    /// Older shortcuts hold the same key and take its presses.
+    Shadowed(Vec<RivalShortcut>),
+}
+
+/// Another global shortcut bound to the same key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RivalShortcut {
+    pub action: String,
+    pub component: String,
+}
+
+/// The single key of a one-key shortcut as `KGlobalAccel` stored it, padded to four
+/// combinations; `None` when nothing usable was stored.
+fn usable_key(stored: &[(Vec<i32>,)]) -> Option<Vec<i32>> {
+    let [(key,)] = stored else {
+        return None;
+    };
+    let (&first, rest) = key.split_first()?;
+    let key_bits = first & QT_KEY_MASK;
+    (key_bits != 0 && key_bits != QT_KEY_UNKNOWN && rest.iter().all(|&combo| combo == 0))
+        .then(|| key.clone())
+}
+
+/// The holders of a key other than our shortcut `id`, by friendly name.
+fn rivals(holders: Vec<ShortcutInfo>, id: &str) -> Vec<RivalShortcut> {
+    holders
+        .into_iter()
+        .filter(|(action, _, component, ..)| !(component == "kwin" && action == id))
+        .map(
+            |(action, action_friendly, component, component_friendly, ..)| RivalShortcut {
+                action: if action_friendly.is_empty() {
+                    action
+                } else {
+                    action_friendly
+                },
+                component: if component_friendly.is_empty() {
+                    component
+                } else {
+                    component_friendly
+                },
+            },
+        )
+        .collect()
+}
 
 /// Locks a std mutex, recovering the data if a previous holder panicked.
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -189,6 +248,11 @@ pub struct KWinClient {
 }
 
 impl KWinClient {
+    /// The session bus connection, for other services on it.
+    pub const fn connection(&self) -> &Connection {
+        &self.connection
+    }
+
     pub async fn connect() -> Result<(
         Self,
         mpsc::UnboundedReceiver<(String, Instant)>,
@@ -328,6 +392,32 @@ impl KWinClient {
         self.send_command::<Value>("REGISTER_HOT_KEY", params)
             .await?;
         Ok(())
+    }
+
+    /// Checks what `KGlobalAccel` made of a registered hotkey: whether it stored a usable
+    /// key, and which other shortcuts hold that key too. The oldest of those wins, and ours
+    /// was just registered, so any other holder keeps ours from firing.
+    pub async fn hotkey_status(&self, id: &str) -> Result<HotkeyStatus> {
+        let accel = KGlobalAccelProxy::new(&self.connection)
+            .await
+            .context("failed to create KGlobalAccel proxy")?;
+        let stored = accel
+            .shortcut_keys(&["kwin", id, "", ""])
+            .await
+            .with_context(|| format!("failed to read the keys of shortcut '{id}'"))?;
+        let Some(key) = usable_key(&stored) else {
+            return Ok(HotkeyStatus::NotAccepted);
+        };
+        let holders = accel
+            .global_shortcuts_by_key(&(key,), &(0,))
+            .await
+            .with_context(|| format!("failed to look up other holders of shortcut '{id}'"))?;
+        let rivals = rivals(holders, id);
+        Ok(if rivals.is_empty() {
+            HotkeyStatus::Active
+        } else {
+            HotkeyStatus::Shadowed(rivals)
+        })
     }
 
     async fn send_command<T>(&self, command_type: &str, params: Value) -> Result<T>
@@ -597,7 +687,7 @@ fn window_state_params(internal_id: &str, update: &WindowUpdate) -> Value {
 
 #[cfg(test)]
 mod helper_tests {
-    use super::{screens_from_entries, window_state_params};
+    use super::{RivalShortcut, rivals, screens_from_entries, usable_key, window_state_params};
     use crate::wm::kwin::types::{ScreenEntry, ScreensResponse};
     use crate::wm::{FrameGeometry, WindowUpdate};
     use serde_json::json;
@@ -708,6 +798,80 @@ mod helper_tests {
             window_state_params("{a}", &fade_only),
             json!({ "internalId": "{a}", "opacity": 0.0 })
         );
+    }
+
+    // Key codes as `KGlobalAccel` reports them: Meta alone, and Meta+Esc.
+    const KEY_META: i32 = 0x0100_0022;
+    const META_ESC: i32 = 0x1100_0000;
+
+    #[test]
+    fn usable_key_accepts_one_stored_key() {
+        assert_eq!(
+            usable_key(&[(vec![KEY_META, 0, 0, 0],)]),
+            Some(vec![KEY_META, 0, 0, 0])
+        );
+        assert_eq!(
+            usable_key(&[(vec![META_ESC, 0, 0, 0],)]),
+            Some(vec![META_ESC, 0, 0, 0])
+        );
+    }
+
+    #[test]
+    fn usable_key_rejects_missing_or_unknown_keys() {
+        assert_eq!(usable_key(&[]), None);
+        assert_eq!(usable_key(&[(vec![],)]), None);
+        assert_eq!(usable_key(&[(vec![0, 0, 0, 0],)]), None);
+        // What Qt makes of a key name it does not know, alone and with Ctrl.
+        assert_eq!(usable_key(&[(vec![0x01ff_ffff, 0, 0, 0],)]), None);
+        assert_eq!(usable_key(&[(vec![0x05ff_ffff, 0, 0, 0],)]), None);
+        assert_eq!(usable_key(&[(vec![KEY_META, KEY_META, 0, 0],)]), None);
+        assert_eq!(
+            usable_key(&[(vec![KEY_META, 0, 0, 0],), (vec![META_ESC, 0, 0, 0],)]),
+            None
+        );
+    }
+
+    fn holder(action: &str, action_friendly: &str, component: &str) -> super::ShortcutInfo {
+        (
+            action.into(),
+            action_friendly.into(),
+            component.into(),
+            String::new(),
+            "default".into(),
+            "Default Context".into(),
+            vec![KEY_META],
+            vec![],
+        )
+    }
+
+    #[test]
+    fn rivals_skip_our_own_shortcut() {
+        let found = rivals(
+            vec![
+                holder("plasma_drop_hotkey_term_1", "", "kwin"),
+                holder(
+                    "activate application launcher",
+                    "Activate Application Launcher",
+                    "plasmashell",
+                ),
+                holder("plasma_drop_hotkey_term_1", "", "other"),
+            ],
+            "plasma_drop_hotkey_term_1",
+        );
+        assert_eq!(
+            found,
+            vec![
+                RivalShortcut {
+                    action: "Activate Application Launcher".into(),
+                    component: "plasmashell".into(),
+                },
+                RivalShortcut {
+                    action: "plasma_drop_hotkey_term_1".into(),
+                    component: "other".into(),
+                },
+            ]
+        );
+        assert_eq!(rivals(vec![holder("mine", "", "kwin")], "mine"), []);
     }
 }
 

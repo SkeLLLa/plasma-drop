@@ -27,7 +27,32 @@ pub trait KWinScripting {
 pub trait KGlobalAccel {
     #[zbus(name = "unregister")]
     fn unregister(&self, component_unique: &str, shortcut_unique: &str) -> zbus::Result<bool>;
+
+    /// The keys stored for `[component, action, component friendly, action friendly]`.
+    #[zbus(name = "shortcutKeys")]
+    fn shortcut_keys(&self, action_id: &[&str]) -> zbus::Result<Vec<(Vec<i32>,)>>;
+
+    /// Every shortcut of every component bound to `key`; search type 0 matches it exactly.
+    #[zbus(name = "globalShortcutsByKey")]
+    fn global_shortcuts_by_key(
+        &self,
+        key: &(Vec<i32>,),
+        search_type: &(i32,),
+    ) -> zbus::Result<Vec<ShortcutInfo>>;
 }
+
+/// `KGlobalShortcutInfo` on the wire: action, action friendly name, component, component
+/// friendly name, context, context friendly name, keys, default keys.
+pub type ShortcutInfo = (
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    Vec<i32>,
+    Vec<i32>,
+);
 
 #[proxy(
     interface = "org.kde.kglobalaccel.Component",

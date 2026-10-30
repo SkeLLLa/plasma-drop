@@ -608,6 +608,33 @@ mod tests {
     }
 
     #[test]
+    fn rejects_duplicate_modifier_only_hotkey() {
+        let err = Config::from_raw(make_raw(vec![
+            app("terminal", "super"),
+            app("files", "meta"),
+        ]))
+        .unwrap_err();
+        assert!(err.to_string().contains("duplicate hotkey"));
+    }
+
+    #[test]
+    fn modifier_only_hotkey_coexists_with_its_combos() {
+        let config = Config::from_raw(make_raw(vec![
+            app("terminal", "super"),
+            app("files", "super+k"),
+        ]))
+        .unwrap();
+        assert_eq!(config.apps[0].hotkey.sequence(), "Meta");
+        assert_eq!(config.apps[1].hotkey.sequence(), "Meta+K");
+    }
+
+    #[test]
+    fn example_config_is_valid() {
+        let raw = toml::from_str(crate::embedded_assets::EXAMPLE_CONFIG).unwrap();
+        Config::from_raw(raw).unwrap();
+    }
+
+    #[test]
     fn rejects_missing_matcher() {
         let mut raw = app("terminal", "ctrl+grave");
         raw.filename = None;

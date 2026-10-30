@@ -22,7 +22,7 @@ The effective log level is resolved with the following priority (highest first):
 ## Core Fields
 
 - `name`: unique app identifier used internally
-- `hotkey`: shortcut string such as `super+f9`
+- `hotkey`: shortcut string such as `super+f9`, or a lone `super` or `alt`; see [Hotkeys](#hotkeys)
 - `filename`: identity matcher for existing windows
 - `command`: explicit spawn command array
 - `process_name`: optional regex matcher against `KWin` identity fields
@@ -33,6 +33,38 @@ The effective log level is resolved with the following priority (highest first):
 - `hide_behavior`: optional `offscreen` (default) or `minimize`; determines whether hiding parks the window outside the screens or uses `KWin`'s minimized state
 - `hide_on_focus_lost`: optional boolean; hide the managed app when another window becomes active. Defaults to `false`.
 - `follow_current_desktop`: optional boolean; when the app is shown, move its window onto the virtual desktop you are currently viewing. Defaults to `false`.
+
+## Hotkeys
+
+A hotkey is zero or more modifiers and one key, joined with `+`, such as `super+f9` or
+`ctrl+shift+grave`. The modifiers are `ctrl` (or `control`), `shift`, `alt` and `super`
+(or `meta`, `win`). Each hotkey must be unique across apps.
+
+A hotkey can also be `super` or `alt` on its own, which fires when you tap that key without
+pressing anything else in between. Combinations with that key keep working, both other apps'
+and plasma-drop's, such as `super+f9`. This needs Plasma 6.1 or later.
+
+A modifier tap fires when the key is released, and only when no other key, mouse button or
+scroll came between press and release. There is no time limit, so holding the key and letting
+go without using it also fires it. `ctrl` and `shift` can't be used alone: they are often held
+on their own, around clicks, drags and input method switches.
+
+`KWin` doesn't tell left and right apart, so both sides of the key fire. Right `alt` doesn't
+fire on layouts where it is `AltGr`. The focused window still sees the key: an `alt` tap can
+also show its menu bar, and a `super` tap reaches a virtual machine or remote desktop that has
+the focus.
+
+Taps don't fire on the lock screen, while the `Alt+Tab` switcher is open, or while an app
+inhibits shortcuts.
+
+By default Plasma's application launcher opens on a `super` tap. When two shortcuts share a
+key the older one wins, so a `super` hotkey doesn't fire until you take it from the launcher.
+Open System Settings > Keyboard > Shortcuts, select Plasma Workspace > Activate Application
+Launcher, and remove `Meta`; the launcher keeps `Alt+F1`. plasma-drop picks the change up
+without a restart.
+
+On start plasma-drop checks every hotkey. A hotkey that `KWin` didn't accept, or that another
+shortcut also uses, is logged as an error and shown in a desktop notification.
 
 ## Matching Behavior
 

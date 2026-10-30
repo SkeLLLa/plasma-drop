@@ -248,7 +248,7 @@ Common fields:
 | Field                | Purpose                                                            |
 | -------------------- | ------------------------------------------------------------------ |
 | `name`               | Unique app identifier                                              |
-| `hotkey`             | Global shortcut, for example `super+f9`                            |
+| `hotkey`             | Global shortcut, for example `super+f9`, or a lone `super` tap     |
 | `filename`           | App/window identity matcher                                        |
 | `command`            | Explicit launch command array, useful for wrappers such as Flatpak |
 | `attach_mode`        | `find` or `find-or-start`                                          |

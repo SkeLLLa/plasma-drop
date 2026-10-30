@@ -3,6 +3,7 @@
 
 [[app]]
 name = "dolphin"
+# A lone "super" or "alt" fires on a tap of that key; see docs/configuration.md#hotkeys.
 hotkey = "super+f9"
 filename = "/usr/bin/dolphin"
 attach_mode = "find-or-start"
