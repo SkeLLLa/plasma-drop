@@ -1,4 +1,4 @@
-.PHONY: build fmt fmt-check lint clippy test doc check lint-deny lint-shell lint-actions
+.PHONY: build fmt fmt-check lint clippy test doc check lint-deny lint-complexity lint-js lint-shell lint-actions
 
 build:
 	cargo build
@@ -18,11 +18,20 @@ test:
 doc:
 	RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --document-private-items
 
-check: fmt-check clippy test doc lint-deny
+check: fmt-check clippy test doc lint-deny lint-complexity lint-js
 
 # Dependency licenses, bans, sources and advisories (deny.toml). Fetches the advisory database.
 lint-deny:
 	cargo deny --locked check
+
+# Cognitive and cyclomatic complexity ceilings (cccc.toml) for the Rust sources and the KWin
+# script; prints the 10 worst functions.
+lint-complexity:
+	cccc --top-cognitive 10 src resources
+
+# Dead code, duplication and complexity in the KWin script (fallow.toml).
+lint-js:
+	fallow
 
 # The CI, release and packaging scripts. -S info: CI's shellcheck may flag what a newer one doesn't.
 lint-shell:

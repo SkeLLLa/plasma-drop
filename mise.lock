@@ -238,6 +238,53 @@ checksum = "sha256:d1e8671f40c89c445aaa1728a21ec04b74be2e5f99091485caeabcc97f99a
 url = "https://github.com/dmtrKovalenko/fff.nvim/releases/download/v0.11.0/fff-mcp-x86_64-unknown-linux-musl"
 url_api = "https://api.github.com/repos/dmtrKovalenko/fff.nvim/releases/assets/578309693"
 
+[[tools."github:fallow-rs/fallow"]]
+version = "3.37.0"
+backend = "github:fallow-rs/fallow"
+specifiers = ["3.37.0"]
+
+[tools."github:fallow-rs/fallow"."platforms.linux-arm64"]
+checksum = "sha256:cbbf98681687fd2f43be852f15aab8ad34fb51cf6f7e354d3bdc1a9b7cba9c5a"
+url = "https://github.com/fallow-rs/fallow/releases/download/v3.37.0/fallow-aarch64-unknown-linux-gnu.tar.gz"
+url_api = "https://api.github.com/repos/fallow-rs/fallow/releases/assets/682720947"
+provenance = "github-attestations"
+
+[tools."github:fallow-rs/fallow"."platforms.linux-arm64-musl"]
+checksum = "sha256:8b43b327c6c7ccebbc49279a51605116032a50a089a165392506155db543be5d"
+url = "https://github.com/fallow-rs/fallow/releases/download/v3.37.0/fallow-aarch64-unknown-linux-musl.tar.gz"
+url_api = "https://api.github.com/repos/fallow-rs/fallow/releases/assets/682720995"
+provenance = "github-attestations"
+
+[tools."github:fallow-rs/fallow"."platforms.linux-x64"]
+checksum = "sha256:7c09d9b7812be030951f75ebfdd98a4e23ecaee6260c34d7e7f3a6c28a0c3cf0"
+url = "https://github.com/fallow-rs/fallow/releases/download/v3.37.0/fallow-x86_64-unknown-linux-gnu.tar.gz"
+url_api = "https://api.github.com/repos/fallow-rs/fallow/releases/assets/682812889"
+provenance = "github-attestations"
+
+[tools."github:fallow-rs/fallow"."platforms.linux-x64-musl"]
+checksum = "sha256:af036ba15ce7e1a4dc981f9a59f07fb0eb61b3e6a89c5270a243d8184eda2d88"
+url = "https://github.com/fallow-rs/fallow/releases/download/v3.37.0/fallow-x86_64-unknown-linux-musl.tar.gz"
+url_api = "https://api.github.com/repos/fallow-rs/fallow/releases/assets/682816484"
+provenance = "github-attestations"
+
+[tools."github:fallow-rs/fallow"."platforms.macos-arm64"]
+checksum = "sha256:02caed6d3da52ea5ffff84b8619bc399a9302c5c6748633177db64005895a159"
+url = "https://github.com/fallow-rs/fallow/releases/download/v3.37.0/fallow-aarch64-apple-darwin.tar.gz"
+url_api = "https://api.github.com/repos/fallow-rs/fallow/releases/assets/682720860"
+provenance = "github-attestations"
+
+[tools."github:fallow-rs/fallow"."platforms.macos-x64"]
+checksum = "sha256:abf1897d6521dbd8fbfb01a4add5070538fdb7cde049090f991780fd3576acc6"
+url = "https://github.com/fallow-rs/fallow/releases/download/v3.37.0/fallow-x86_64-apple-darwin.tar.gz"
+url_api = "https://api.github.com/repos/fallow-rs/fallow/releases/assets/682801832"
+provenance = "github-attestations"
+
+[tools."github:fallow-rs/fallow"."platforms.windows-x64"]
+checksum = "sha256:f20ad53eb2190e9ab04288a58068f568699757744fccf5adca216a5250789134"
+url = "https://github.com/fallow-rs/fallow/releases/download/v3.37.0/fallow-x86_64-pc-windows-msvc.zip"
+url_api = "https://api.github.com/repos/fallow-rs/fallow/releases/assets/682802512"
+provenance = "github-attestations"
+
 [[tools."github:jdx/packslip"]]
 version = "1.11.1"
 backend = "github:jdx/packslip"
@@ -283,6 +330,53 @@ provenance = "github-attestations"
 checksum = "sha256:72281e4cfd3390eb0ff31165c6085edd47b64971d8cf354f43714585d091b774"
 url = "https://github.com/jdx/packslip/releases/download/v1.11.1/packslip-v1.11.1-windows-x64.zip"
 url_api = "https://api.github.com/repos/jdx/packslip/releases/assets/672035206"
+provenance = "github-attestations"
+
+[[tools."github:moznion/cccc"]]
+version = "1.8.5"
+backend = "github:moznion/cccc"
+specifiers = ["1.8.5"]
+
+[tools."github:moznion/cccc"."platforms.linux-arm64"]
+checksum = "sha256:62004c8f7bfd5c452a5e0afe54248919d7f3156ab707c24d33715566ffc3182e"
+url = "https://github.com/moznion/cccc/releases/download/v1.8.5/cccc-v1.8.5-aarch64-unknown-linux-musl.tar.gz"
+url_api = "https://api.github.com/repos/moznion/cccc/releases/assets/683651439"
+provenance = "github-attestations"
+
+[tools."github:moznion/cccc"."platforms.linux-arm64-musl"]
+checksum = "sha256:62004c8f7bfd5c452a5e0afe54248919d7f3156ab707c24d33715566ffc3182e"
+url = "https://github.com/moznion/cccc/releases/download/v1.8.5/cccc-v1.8.5-aarch64-unknown-linux-musl.tar.gz"
+url_api = "https://api.github.com/repos/moznion/cccc/releases/assets/683651439"
+provenance = "github-attestations"
+
+[tools."github:moznion/cccc"."platforms.linux-x64"]
+checksum = "sha256:7419ea8d8828c3d405694be400da1b21cdb854e9af1c10110d5d970bc1700094"
+url = "https://github.com/moznion/cccc/releases/download/v1.8.5/cccc-v1.8.5-x86_64-unknown-linux-musl.tar.gz"
+url_api = "https://api.github.com/repos/moznion/cccc/releases/assets/683651485"
+provenance = "github-attestations"
+
+[tools."github:moznion/cccc"."platforms.linux-x64-musl"]
+checksum = "sha256:7419ea8d8828c3d405694be400da1b21cdb854e9af1c10110d5d970bc1700094"
+url = "https://github.com/moznion/cccc/releases/download/v1.8.5/cccc-v1.8.5-x86_64-unknown-linux-musl.tar.gz"
+url_api = "https://api.github.com/repos/moznion/cccc/releases/assets/683651485"
+provenance = "github-attestations"
+
+[tools."github:moznion/cccc"."platforms.macos-arm64"]
+checksum = "sha256:486ded852eaa3483956acde058e32b3616a4883c84ba1f424852680e61963801"
+url = "https://github.com/moznion/cccc/releases/download/v1.8.5/cccc-v1.8.5-aarch64-apple-darwin.tar.gz"
+url_api = "https://api.github.com/repos/moznion/cccc/releases/assets/683651449"
+provenance = "github-attestations"
+
+[tools."github:moznion/cccc"."platforms.macos-x64"]
+checksum = "sha256:9ef0ad139665f0ecccecbb183cc851c87068d7bbf4fb9f1e572387b871a47ea8"
+url = "https://github.com/moznion/cccc/releases/download/v1.8.5/cccc-v1.8.5-x86_64-apple-darwin.tar.gz"
+url_api = "https://api.github.com/repos/moznion/cccc/releases/assets/683651463"
+provenance = "github-attestations"
+
+[tools."github:moznion/cccc"."platforms.windows-x64"]
+checksum = "sha256:da6c0b70c6c9610807bf796ea37f00cdeb2a70c7af7b6b949c5b84b2b8738986"
+url = "https://github.com/moznion/cccc/releases/download/v1.8.5/cccc-v1.8.5-x86_64-pc-windows-msvc.zip"
+url_api = "https://api.github.com/repos/moznion/cccc/releases/assets/683651471"
 provenance = "github-attestations"
 
 [[tools.jactionlint]]

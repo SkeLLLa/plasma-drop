@@ -204,6 +204,20 @@ jobs:
             echo "::notice::${TAG} is already released from ${tag_sha}"
           else
             state="$(.ci/release.sh release-state "${TAG}")"
+            # The release list lags the API that created the draft: if release-plz made it in this
+            # run, wait for it rather than create a second draft for the tag.
+            if [ "${state}" = none ] && jq -e --arg t "${TAG}" 'any(.releases[]?; .tag == $t)' \
+              "${RUNNER_TEMP}/release-plz-output.json" >/dev/null; then
+              for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
+                sleep 5
+                state="$(.ci/release.sh release-state "${TAG}")"
+                [ "${state}" = none ] || break
+              done
+              if [ "${state}" = none ]; then
+                echo "::error::release-plz created ${TAG}'s release but GitHub does not list it; re-run this job"
+                exit 1
+              fi
+            fi
             case "${state}" in
               draft) released=true ;;
               published) echo "::notice::${TAG} is already published" ;;

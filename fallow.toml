@@ -1,0 +1,10 @@
+# fallow: dead code, duplication and complexity of the KWin script (`make lint-js`).
+# See https://fallow.tools/docs/
+
+# KWin loads the script itself (src/wm/kwin/script.rs); nothing imports it.
+entry = ["resources/plasma-drop.kwin.js"]
+
+[health]
+# The script has no JS tests, so every CRAP estimate treats it as uncovered and flags any function
+# with a few branches. Gate on cyclomatic/cognitive complexity only.
+maxCrap = 10000.0

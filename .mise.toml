@@ -30,6 +30,10 @@ cargo-binstall = "1.26.1"
 "github:dmtrKovalenko/fff.nvim"= { version = "0.11.0", exe = "fff-mcp", postinstall = """
 command -v claude >/dev/null && claude mcp remove fff -s user 2>/dev/null; command -v claude >/dev/null && claude mcp add -s user fff -- $MISE_TOOL_INSTALL_PATH/fff-mcp --log-level warn || true; command -v codex >/dev/null && codex mcp add fff -- $MISE_TOOL_INSTALL_PATH/fff-mcp --log-level warn || true
 """, platforms = { linux-x64 = { asset_pattern = "fff-mcp-x86_64-unknown-linux-musl" }, linux-arm64 = { asset_pattern = "fff-mcp-aarch64-unknown-linux-musl" }, macos-x64 = { asset_pattern = "fff-mcp-x86_64-apple-darwin" }, macos-arm64 = { asset_pattern = "fff-mcp-aarch64-apple-darwin" } } }
+# Dead code, duplication and complexity in the KWin script (`lint-js`, fallow.toml).
+"github:fallow-rs/fallow" = "3.37.0"
+# Cognitive/cyclomatic complexity ceilings for Rust and JS (`lint-complexity`, cccc.toml).
+"github:moznion/cccc" = "1.8.5"
 
 # Tasks that compile run Cargo through mbx (mr-boxington): compiled crates are cached and shared
 # across checkouts. Plain `cargo` (and the Makefile) keeps working without it; CI uses plain Cargo.
@@ -65,6 +69,14 @@ run = "mbx test"
 description = "Build crate docs with warnings denied"
 run = 'RUSTDOCFLAGS="-D warnings" mbx doc --no-deps --document-private-items'
 
+[tasks.lint-complexity]
+description = "cccc: cognitive and cyclomatic complexity ceilings for the Rust sources and the KWin script"
+run = "make lint-complexity"
+
+[tasks.lint-js]
+description = "fallow: dead code, duplication and complexity in the KWin script"
+run = "make lint-js"
+
 [tasks.lint-shell]
 description = "shellcheck the CI and packaging scripts"
 run = "make lint-shell"
@@ -79,4 +91,4 @@ run = "cargo deny --locked check"
 
 [tasks.check]
 description = "Run the full quality suite"
-depends = ["fmt-check", "lint", "test", "doc", "lint-deny"]
+depends = ["fmt-check", "lint", "test", "doc", "lint-deny", "lint-complexity", "lint-js"]

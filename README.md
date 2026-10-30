@@ -319,6 +319,8 @@ Common project scripts:
 | Lint         | `make lint` or `make clippy` | `mise run lint` or `mise run clippy` |
 | Test         | `make test`                  | `mise run test`                      |
 | Docs         | `make doc`                   | `mise run doc`                       |
+| Complexity   | `make lint-complexity`       | `mise run lint-complexity`           |
+| KWin script  | `make lint-js`               | `mise run lint-js`                   |
 | Full check   | `make check`                 | `mise run check`                     |
 
 Both runners use the same Cargo operations; mise also enables the Mr Boxington build cache.

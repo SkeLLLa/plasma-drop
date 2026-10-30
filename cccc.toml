@@ -1,0 +1,6 @@
+# cccc: cognitive and cyclomatic complexity of the Rust sources and the KWin script
+# (`make lint-complexity`). Ceilings sit at today's worst functions (Config::from_raw and main);
+# lower them as those get split up.
+max-cognitive = 28
+max-cyclomatic = 20
+table = true

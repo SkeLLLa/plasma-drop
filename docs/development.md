@@ -38,6 +38,8 @@ Common scripts:
 | Test | `make test` | `mise run test` |
 | Docs | `make doc` | `mise run doc` |
 | Dependency audit | `make lint-deny` | `mise run lint-deny` |
+| Complexity ceilings (needs `cccc`) | `make lint-complexity` | `mise run lint-complexity` |
+| KWin script analysis (needs `fallow`) | `make lint-js` | `mise run lint-js` |
 | Shell lint | `make lint-shell` | `mise run lint-shell` |
 | Workflow lint and action pins (needs `jactionlint`, `bats`) | `make lint-actions` | `mise run lint-actions` |
 | Full check | `make check` | `mise run check` |
