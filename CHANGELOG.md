@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.17.0](https://github.com/SkeLLLa/plasma-drop/compare/v1.16.0...v1.17.0) - 2026-10-30
+
+### Added
+
+- single modifier hotkeys & notify on conflicts
+
 ## [1.16.0](https://github.com/SkeLLLa/plasma-drop/compare/v1.15.0...v1.16.0) - 2026-10-29
 
 ### Added
