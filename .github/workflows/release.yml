@@ -1035,9 +1035,10 @@ jobs:
           tags="$(gh api --paginate "repos/${R}/releases?per_page=100" \
             --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name')"
           latest="$(.ci/release.sh make-latest "${VERSION}" <<< "${tags}")"
-          # target_commitish only matters if the tag vanished: it pins a recreated tag to this commit.
+          # No target_commitish: the tag exists (asserted above, and the release-tags ruleset keeps
+          # it), and changing it makes GitHub demand the workflows permission once master holds a
+          # workflow change, which GITHUB_TOKEN never has (HTTP 403).
           gh api -X PATCH "repos/${R}/releases/${id}" -F draft=false -f make_latest="${latest}" \
-            -f target_commitish="${GITHUB_SHA}" \
             --jq '"published \(.tag_name), draft=\(.draft), immutable=\(.immutable // "n/a")"'
           echo "make_latest=${latest}"
           .ci/release.sh assert-tag "${TAG_NAME}" "${GITHUB_SHA}"
