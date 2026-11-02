@@ -633,6 +633,21 @@ impl WindowManager for KWinClient {
         Ok(())
     }
 
+    async fn park_window(&self, internal_id: &str, position: Point) -> Result<()> {
+        self.send_command::<Value>(
+            "PARK_WINDOW",
+            json!({ "internalId": internal_id, "x": position.x, "y": position.y }),
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn unpark_window(&self, internal_id: &str) -> Result<()> {
+        self.send_command::<Value>("UNPARK_WINDOW", json!({ "internalId": internal_id }))
+            .await?;
+        Ok(())
+    }
+
     async fn update_window(&self, internal_id: &str, update: &WindowUpdate) -> Result<()> {
         self.send_command::<Value>("SET_WINDOW_STATE", window_state_params(internal_id, update))
             .await?;

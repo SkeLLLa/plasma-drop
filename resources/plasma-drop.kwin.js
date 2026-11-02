@@ -355,6 +355,76 @@ cmds["MOVE_WINDOW_TO_CURRENT_DESKTOP"] = (params) => {
     }
     return {};
 };
+// Windows parked offscreen by a hide, by id, each a function that stops guarding it.
+// KWin pulls an offscreen window back onto a screen whenever the app acknowledges a
+// configure, e.g. after the window loses focus or the work area changes, so a parked
+// window is moved back to where it was parked.
+const parkedWindows = {};
+// More restores than this within a second means something keeps moving the window on
+// purpose; the guard then gives up rather than fight it.
+const PARK_MAX_RESTORES_PER_SECOND = 10;
+const unpark = (id) => {
+    if (parkedWindows[id]) {
+        parkedWindows[id]();
+    }
+};
+const describeWindow = (window) =>
+    `${window.internalId} (${window.resourceClass || "?"}: ${window.caption || ""})`;
+cmds["PARK_WINDOW"] = (params) => {
+    const window = kwin.getWindowByInternalIdRequired(params.internalId);
+    const id = params.internalId;
+    unpark(id);
+    let restoring = false;
+    let burstStart = 0;
+    let burstRestores = 0;
+    const keep = () => {
+        const g = window.frameGeometry;
+        if (restoring || (Math.abs(g.x - params.x) < 1 && Math.abs(g.y - params.y) < 1)) {
+            return;
+        }
+        const now = Date.now();
+        if (now - burstStart > 1000) {
+            burstStart = now;
+            burstRestores = 0;
+        }
+        if (++burstRestores > PARK_MAX_RESTORES_PER_SECOND) {
+            log.error(
+                `hidden window ${describeWindow(window)} keeps moving back on screen; ` +
+                    "no longer keeping it offscreen"
+            );
+            unpark(id);
+            return;
+        }
+        log.warning(
+            `KWin moved hidden window ${describeWindow(window)} to ` +
+                `${Math.round(g.x)},${Math.round(g.y)}; moving it back offscreen to ` +
+                `${params.x},${params.y}`
+        );
+        restoring = true;
+        try {
+            moveTo(window, params.x, params.y);
+        } finally {
+            restoring = false;
+        }
+    };
+    const removed = (closed) => {
+        if (closed === window) {
+            unpark(id);
+        }
+    };
+    window.frameGeometryChanged.connect(keep);
+    workspace.windowRemoved.connect(removed);
+    parkedWindows[id] = () => {
+        window.frameGeometryChanged.disconnect(keep);
+        workspace.windowRemoved.disconnect(removed);
+        delete parkedWindows[id];
+    };
+    return {};
+};
+cmds["UNPARK_WINDOW"] = (params) => {
+    unpark(params.internalId);
+    return {};
+};
 cmds["REGISTER_HOT_KEY"] = (params) => {
     registerShortcut(params.name, params.title, params.sequence, () => {
         callDBus(

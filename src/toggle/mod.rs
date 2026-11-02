@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 use tokio::time::MissedTickBehavior;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 mod spawn;
 
@@ -100,6 +100,7 @@ impl ToggleService {
         shortcut_id: &str,
         pressed_at: Instant,
     ) -> Result<Option<PendingLaunch>> {
+        debug!("hotkey '{shortcut_id}' pressed");
         if self.should_ignore_shortcut(shortcut_id, pressed_at).await {
             info!("ignored repeated hotkey '{}'", shortcut_id);
             return Ok(None);
@@ -182,9 +183,13 @@ impl ToggleService {
             })
         };
         let Some((app_name, tracked_id)) = tracked else {
+            debug!(
+                "focus moved to window {activated_window_id:?}; no shown app hides on focus loss"
+            );
             return Ok(());
         };
         if activated_window_id.is_some() && activated_window_id == tracked_id {
+            debug!("focus moved to app '{app_name}' itself");
             return Ok(());
         }
 
@@ -196,6 +201,7 @@ impl ToggleService {
             .await?
             .map(|window| window.internal_id);
         if active_window_id != tracked_id {
+            info!("hiding app '{app_name}' because focus moved to window {active_window_id:?}");
             let screens = self.current_screens().await;
             self.hide_app(&app_name, &screens).await?;
         }
@@ -337,6 +343,8 @@ impl ToggleService {
         let keep_full_screen =
             app.tracks(&window.internal_id) && app.hidden_full_screen && window.modes.full_screen;
         drop(registry);
+        // Release the window from where hiding parked it, so it can be placed.
+        self.kwin.unpark_window(&window.internal_id).await?;
         // Un-minimize any minimized window, e.g. a fullscreen one that hiding minimized.
         if config.hide_behavior == HideBehavior::Minimize || window.minimized {
             self.kwin
@@ -373,6 +381,10 @@ impl ToggleService {
             .with_context(|| format!("invalid placement for '{app_name}'"))?;
         let visible = screen.placement_rect(&config.placement);
         let hidden = hidden_rect_for_screens(screens, &visible, config.animation.direction);
+        debug!(
+            "showing window {} from {:?} at {visible:?} (screen '{}')",
+            window.internal_id, window.frame_geometry, screen.name
+        );
         Ok(ShowPlacement::Rects { visible, hidden })
     }
 
@@ -507,6 +519,10 @@ impl ToggleService {
         let visible_rect = screen.placement_rect(&config.placement);
         let hidden_rect =
             hidden_rect_for_screens(screens, &visible_rect, config.animation.direction);
+        debug!(
+            "hiding window {} from {:?} to offscreen {hidden_rect:?} (screen '{}')",
+            window.internal_id, window.frame_geometry, screen.name
+        );
         if let Some(plan) = TransitionPlan::from_config(
             &config.animation,
             &visible_rect,
@@ -514,11 +530,22 @@ impl ToggleService {
             TransitionPhase::Hide,
         ) {
             self.run_animation(&window.internal_id, &plan, TransitionPhase::Hide)
-                .await
+                .await?;
         } else {
             self.apply_hidden_geometry(&window.internal_id, &hidden_rect)
-                .await
+                .await?;
         }
+        // KWin pulls an offscreen window back onto a screen once it answers a configure,
+        // e.g. when the still active window loses focus, so keep it where it was parked.
+        self.kwin
+            .park_window(
+                &window.internal_id,
+                Point {
+                    x: hidden_rect.x,
+                    y: hidden_rect.y,
+                },
+            )
+            .await
     }
 
     async fn run_animation(

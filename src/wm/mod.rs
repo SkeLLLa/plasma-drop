@@ -40,6 +40,12 @@ pub trait WindowManager: Send + Sync {
     async fn send_window_to_screen(&self, internal_id: &str, screen: &str) -> Result<()>;
     async fn bring_window_to_foreground(&self, internal_id: &str) -> Result<()>;
     async fn move_window_to_current_desktop(&self, internal_id: &str) -> Result<()>;
+    /// Keeps a window hidden offscreen at `position`, moving it back whenever the window
+    /// manager pulls it onto a screen, until [`Self::unpark_window`].
+    async fn park_window(&self, internal_id: &str, position: Point) -> Result<()>;
+    /// Stops keeping the window where [`Self::park_window`] put it; a no-op when it is not
+    /// parked.
+    async fn unpark_window(&self, internal_id: &str) -> Result<()>;
     /// Applies `update` as a move, then a resize (when `update.resize`), then an opacity
     /// change.
     async fn update_window(&self, internal_id: &str, update: &WindowUpdate) -> Result<()>;

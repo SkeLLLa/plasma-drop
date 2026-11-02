@@ -105,6 +105,9 @@ struct MockKWin {
     mode_ack: ModeAck,
     /// Geometry the window takes when it acknowledges leaving maximized/fullscreen state.
     normal_geometry: Option<FrameGeometry>,
+    /// Windows kept offscreen by `park_window`, by id. Kept out of `calls` so call-order
+    /// assertions stay about placement.
+    parked: Mutex<HashMap<String, Point>>,
 }
 
 /// When a mock window acknowledges leaving maximized/fullscreen state.
@@ -279,6 +282,19 @@ impl WindowManager for MockKWin {
             .lock()
             .await
             .push(format!("desktop:{internal_id}"));
+        Ok(())
+    }
+
+    async fn park_window(&self, internal_id: &str, position: Point) -> Result<()> {
+        self.parked
+            .lock()
+            .await
+            .insert(internal_id.to_string(), position);
+        Ok(())
+    }
+
+    async fn unpark_window(&self, internal_id: &str) -> Result<()> {
+        self.parked.lock().await.remove(internal_id);
         Ok(())
     }
 }
@@ -736,6 +752,30 @@ async fn toggle_off_uses_computed_hidden_rect() {
             "move:{abc}:960:-1080:960:1080".to_string()
         ]
     );
+    assert_eq!(
+        *kwin.parked.lock().await,
+        HashMap::from([("{abc}".to_string(), Point { x: 960, y: -1080 })])
+    );
+}
+
+#[tokio::test]
+async fn toggle_on_releases_the_parked_window() {
+    let managed = managed_app(app("dolphin", "super+f9", "dolphin"), "{abc}");
+    let registry = Arc::new(Mutex::new(AppRegistry::new(vec![managed])));
+    registry.lock().await.mark_visible("dolphin");
+    let kwin = mock_kwin(Some(window(
+        "{abc}",
+        "dolphin",
+        "Dolphin",
+        geometry(10, 20, 300, 400),
+    )));
+    let service = ToggleService::new(registry, Arc::<MockKWin>::clone(&kwin), vec![screen()]);
+
+    service.toggle_app("dolphin").await.unwrap();
+    assert!(kwin.parked.lock().await.contains_key("{abc}"));
+    service.toggle_app("dolphin").await.unwrap();
+
+    assert!(kwin.parked.lock().await.is_empty());
 }
 
 #[tokio::test]
@@ -759,6 +799,7 @@ async fn toggle_off_minimizes_when_configured() {
         *kwin.calls.lock().await,
         vec!["minimized:{abc}:true".to_string()]
     );
+    assert!(kwin.parked.lock().await.is_empty());
 }
 
 #[tokio::test]
