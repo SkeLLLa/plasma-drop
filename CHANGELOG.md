@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.17.4](https://github.com/SkeLLLa/plasma-drop/compare/v1.17.3...v1.17.4) - 2026-11-02
+
+### Fixed
+
+- focus remove on hide
+
 ## [1.17.3](https://github.com/SkeLLLa/plasma-drop/compare/v1.17.2...v1.17.3) - 2026-11-02
 
 ### Fixed
