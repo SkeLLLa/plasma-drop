@@ -32,6 +32,12 @@ pub struct WindowResponse {
     pub window: Option<ManagedWindow>,
 }
 
+/// `RELEASE_FOCUS`: the window that took focus, described for the log.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FocusReleasedResponse {
+    pub activated: Option<String>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct CursorPositionResponse {
     pub position: Option<Point>,

@@ -99,7 +99,7 @@ plasma-drop records the window's original decoration state when it attaches and 
 
 ## Hiding
 
-`hide_behavior = "offscreen"` is the default: the window remains running and is parked outside every screen. It is the behavior to use with slide-out animations.
+`hide_behavior = "offscreen"` is the default: the window remains running and is parked outside every screen. It is the behavior to use with slide-out animations. Hiding an app with its hotkey also gives keyboard focus back to the window you used before it on the current desktop (and screen, with separate screen focus), so typing does not go to the hidden window. `hide_behavior = "minimize"` gets the same from `KWin` itself.
 
 `hide_behavior = "minimize"` uses `KWin` minimization instead. The window is restored before it is shown again, but minimizing hides immediately and skips every hide animation. A `fade` animation can still fade the restored window in. `slide` and `slide-fade` run only on show and may briefly display the restored window at its old position before moving it to the off-screen animation start. Use `offscreen` for symmetric, flicker-free slide animations.
 

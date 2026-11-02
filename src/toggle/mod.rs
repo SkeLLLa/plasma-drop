@@ -26,6 +26,16 @@ const NORMAL_STATE_TIMEOUT: Duration = Duration::from_secs(1);
 /// placement; an animated show re-applies it when it ends.
 const LAUNCH_SETTLE_DELAY: Duration = Duration::from_millis(150);
 
+/// Whether hiding a window moves focus off it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FocusAfterHide {
+    /// Hidden by its own hotkey while it may still have focus: give focus to the window the
+    /// user was in before.
+    Release,
+    /// Focus already moved, or the show that follows takes it.
+    Keep,
+}
+
 /// A `find_or_start` app whose command was spawned; its window has not appeared yet.
 /// Hand it to [`ToggleService::wait_for_launch`] off the event loop.
 #[derive(Debug)]
@@ -156,8 +166,14 @@ impl ToggleService {
                 .resolve_existing_window(&target_config, target_tracked_window_id)
                 .await?;
             if let Some(window) = window {
-                self.hide_resolved(app_name, &target_config, window, &screens)
-                    .await?;
+                self.hide_resolved(
+                    app_name,
+                    &target_config,
+                    window,
+                    &screens,
+                    FocusAfterHide::Release,
+                )
+                .await?;
                 return Ok(None);
             }
             // The window was closed behind our back: forget it and show a fresh one.
@@ -454,7 +470,9 @@ impl ToggleService {
             .resolve_existing_window(&config, tracked_window_id)
             .await?;
         if let Some(window) = resolved_window {
-            return self.hide_resolved(app_name, &config, window, screens).await;
+            return self
+                .hide_resolved(app_name, &config, window, screens, FocusAfterHide::Keep)
+                .await;
         }
 
         warn!(
@@ -472,6 +490,7 @@ impl ToggleService {
         config: &AppConfig,
         window: ManagedWindow,
         screens: &[ScreenInfo],
+        focus: FocusAfterHide,
     ) -> Result<()> {
         // A window found by matching instead of the tracked one, e.g. after the tracked one
         // closed, is taken over first so it does not inherit the old window's restore state.
@@ -483,7 +502,7 @@ impl ToggleService {
             app.hidden_full_screen = false;
         }
         drop(registry);
-        let hidden = self.hide_window(config, &window, screens).await;
+        let hidden = self.hide_window(config, &window, screens, focus).await;
         let mut registry = self.registry.lock().await;
         if let Some(app) = registry.managed_app_mut(app_name) {
             app.hidden_full_screen = window.modes.full_screen;
@@ -503,8 +522,10 @@ impl ToggleService {
         config: &AppConfig,
         window: &ManagedWindow,
         screens: &[ScreenInfo],
+        focus: FocusAfterHide,
     ) -> Result<()> {
-        // KWin pins a fullscreen window's geometry, so it cannot be moved offscreen.
+        // KWin pins a fullscreen window's geometry, so it cannot be moved offscreen. KWin
+        // moves focus off a window it minimizes itself.
         if config.hide_behavior == HideBehavior::Minimize || window.modes.full_screen {
             return self
                 .kwin
@@ -545,7 +566,24 @@ impl ToggleService {
                     y: hidden_rect.y,
                 },
             )
-            .await
+            .await?;
+        // Released only once the window is parked: losing focus makes the app answer a
+        // configure, which would otherwise pull it back onto the screen mid-animation.
+        if focus == FocusAfterHide::Release {
+            self.release_focus(&window.internal_id, &screen.name).await;
+        }
+        Ok(())
+    }
+
+    /// Moves focus off the hidden window, best effort: the window is hidden either way.
+    async fn release_focus(&self, internal_id: &str, screen: &str) {
+        match self.kwin.release_focus(internal_id, screen).await {
+            Ok(Some(activated)) => {
+                debug!("moved focus from hidden window {internal_id} to {activated}");
+            }
+            Ok(None) => debug!("focus did not move to a window after hiding window {internal_id}"),
+            Err(error) => warn!("failed to move focus off hidden window {internal_id}: {error:#}"),
+        }
     }
 
     async fn run_animation(

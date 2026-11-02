@@ -108,6 +108,10 @@ struct MockKWin {
     /// Windows kept offscreen by `park_window`, by id. Kept out of `calls` so call-order
     /// assertions stay about placement.
     parked: Mutex<HashMap<String, Point>>,
+    /// `release_focus` calls as `id@screen`, kept out of `calls` like `parked`.
+    released: Mutex<Vec<String>>,
+    /// Makes every `release_focus` call fail.
+    fail_release: bool,
 }
 
 /// When a mock window acknowledges leaving maximized/fullscreen state.
@@ -296,6 +300,21 @@ impl WindowManager for MockKWin {
     async fn unpark_window(&self, internal_id: &str) -> Result<()> {
         self.parked.lock().await.remove(internal_id);
         Ok(())
+    }
+
+    async fn release_focus(&self, internal_id: &str, screen: &str) -> Result<Option<String>> {
+        assert!(
+            self.parked.lock().await.contains_key(internal_id),
+            "focus released before window {internal_id} was parked"
+        );
+        self.released
+            .lock()
+            .await
+            .push(format!("{internal_id}@{screen}"));
+        if self.fail_release {
+            bail!("release failed");
+        }
+        Ok(Some("{previous}".into()))
     }
 }
 
@@ -756,6 +775,65 @@ async fn toggle_off_uses_computed_hidden_rect() {
         *kwin.parked.lock().await,
         HashMap::from([("{abc}".to_string(), Point { x: 960, y: -1080 })])
     );
+    assert_eq!(
+        *kwin.released.lock().await,
+        vec!["{abc}@screen".to_string()]
+    );
+}
+
+#[tokio::test]
+async fn toggle_off_hides_even_when_releasing_focus_fails() {
+    let managed = managed_app(app("dolphin", "super+f9", "dolphin"), "{abc}");
+    let registry = Arc::new(Mutex::new(AppRegistry::new(vec![managed])));
+    registry.lock().await.mark_visible("dolphin");
+    let kwin = Arc::new(MockKWin {
+        window: Mutex::new(Some(window(
+            "{abc}",
+            "dolphin",
+            "Dolphin",
+            geometry(10, 20, 300, 400),
+        ))),
+        fail_release: true,
+        ..MockKWin::default()
+    });
+    let service = ToggleService::new(
+        Arc::clone(&registry),
+        Arc::<MockKWin>::clone(&kwin),
+        vec![screen()],
+    );
+
+    service.toggle_app("dolphin").await.unwrap();
+
+    assert_eq!(kwin.released.lock().await.len(), 1);
+    assert_eq!(registry.lock().await.currently_visible_name(), None);
+}
+
+#[tokio::test]
+async fn animated_toggle_off_releases_focus_once_after_parking() {
+    let mut app = app("dolphin", "super+f9", "dolphin");
+    app.animation = AnimationConfig {
+        style: AnimationStyle::SlideFade,
+        duration_ms: 50,
+        ..AnimationConfig::default()
+    };
+    let managed = managed_app(app, "{abc}");
+    let registry = Arc::new(Mutex::new(AppRegistry::new(vec![managed])));
+    registry.lock().await.mark_visible("dolphin");
+    let kwin = mock_kwin(Some(window(
+        "{abc}",
+        "dolphin",
+        "Dolphin",
+        geometry(10, 20, 300, 400),
+    )));
+    let service = ToggleService::new(registry, Arc::<MockKWin>::clone(&kwin), vec![screen()]);
+
+    service.toggle_app("dolphin").await.unwrap();
+
+    // The mock checks the window was parked first.
+    assert_eq!(
+        *kwin.released.lock().await,
+        vec!["{abc}@screen".to_string()]
+    );
 }
 
 #[tokio::test]
@@ -800,6 +878,8 @@ async fn toggle_off_minimizes_when_configured() {
         vec!["minimized:{abc}:true".to_string()]
     );
     assert!(kwin.parked.lock().await.is_empty());
+    // KWin moves focus off a window it minimizes.
+    assert!(kwin.released.lock().await.is_empty());
 }
 
 #[tokio::test]
@@ -864,6 +944,8 @@ async fn hides_visible_app_after_focus_moves_away() {
         ]
     );
     assert_eq!(registry.lock().await.currently_visible_name(), None);
+    // Focus already moved.
+    assert!(kwin.released.lock().await.is_empty());
 }
 
 #[tokio::test]
@@ -1663,6 +1745,8 @@ async fn toggle_on_with_other_visible_fetches_screens_once() {
     service.toggle_app("kitty").await.unwrap();
 
     assert_eq!(kwin.info_requests.load(Ordering::Relaxed), 1);
+    // The show that follows takes focus.
+    assert!(kwin.released.lock().await.is_empty());
     let registry = registry.lock().await;
     assert_eq!(registry.currently_visible_name(), Some("kitty"));
     drop(registry);

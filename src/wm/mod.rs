@@ -46,6 +46,10 @@ pub trait WindowManager: Send + Sync {
     /// Stops keeping the window where [`Self::park_window`] put it; a no-op when it is not
     /// parked.
     async fn unpark_window(&self, internal_id: &str) -> Result<()>;
+    /// Moves focus off a hidden window that still has it, to the window the user most
+    /// recently used on `screen`, the screen it was shown on. Returns a description of the
+    /// newly focused window, `None` when focus did not move to a window.
+    async fn release_focus(&self, internal_id: &str, screen: &str) -> Result<Option<String>>;
     /// Applies `update` as a move, then a resize (when `update.resize`), then an opacity
     /// change.
     async fn update_window(&self, internal_id: &str, update: &WindowUpdate) -> Result<()>;

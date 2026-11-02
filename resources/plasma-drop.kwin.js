@@ -369,7 +369,9 @@ const unpark = (id) => {
     }
 };
 const describeWindow = (window) =>
-    `${window.internalId} (${window.resourceClass || "?"}: ${window.caption || ""})`;
+    `${window.internalId} (${window.resourceClass || "?"}: ${
+        window.desktopWindow ? "desktop" : window.caption || ""
+    })`;
 cmds["PARK_WINDOW"] = (params) => {
     const window = kwin.getWindowByInternalIdRequired(params.internalId);
     const id = params.internalId;
@@ -395,7 +397,7 @@ cmds["PARK_WINDOW"] = (params) => {
             unpark(id);
             return;
         }
-        log.warning(
+        log.info(
             `KWin moved hidden window ${describeWindow(window)} to ` +
                 `${Math.round(g.x)},${Math.round(g.y)}; moving it back offscreen to ` +
                 `${params.x},${params.y}`
@@ -425,6 +427,97 @@ cmds["UNPARK_WINDOW"] = (params) => {
     unpark(params.internalId);
     return {};
 };
+
+// Windows by most recent activation, newest first; KWin's own focus chain is not scriptable.
+const recentlyActive = [];
+const RECENTLY_ACTIVE_LIMIT = 32;
+const forgetRecent = (window) => {
+    const index = recentlyActive.indexOf(window);
+    if (index !== -1) {
+        recentlyActive.splice(index, 1);
+    }
+};
+const rememberActivation = (window) => {
+    if (!window) {
+        return;
+    }
+    forgetRecent(window);
+    recentlyActive.unshift(window);
+    recentlyActive.length = Math.min(recentlyActive.length, RECENTLY_ACTIVE_LIMIT);
+};
+workspace.windowRemoved.connect(forgetRecent);
+
+const isOnCurrentDesktop = (window) => {
+    if (window.onAllDesktops) {
+        return true;
+    }
+    // Per-screen virtual desktops, where KWin has them.
+    const current =
+        typeof workspace.currentDesktopForScreen === "function" && window.output
+            ? workspace.currentDesktopForScreen(window.output)
+            : workspace.currentDesktop;
+    return Boolean(current) && window.desktops.some((desktop) => desktop.id === current.id);
+};
+const isOnCurrentActivity = (window) => {
+    const current = workspace.currentActivity;
+    // No activities means all of them; no current activity means the service is not running.
+    return !current || window.activities.length === 0 || window.activities.includes(current);
+};
+const isTransientOf = (window, root) => {
+    for (let parent = window.transientFor, depth = 0; parent && depth < 16; depth++) {
+        if (parent === root) {
+            return true;
+        }
+        parent = parent.transientFor;
+    }
+    return false;
+};
+// Whether focus may move to `window` once `hidden` is hidden: KWin's own choice of the next
+// window, plus skipping switcher-hidden helpers (e.g. the invisible xwaylandvideobridge) and
+// the hidden app's dialogs, which would take the input back to the hidden app.
+const takesFocusAfterHide = (window, hidden, screen) =>
+    window !== hidden &&
+    !window.deleted &&
+    window.managed &&
+    (window.normalWindow || window.dialog) &&
+    window.wantsInput &&
+    !window.skipSwitcher &&
+    !window.minimized &&
+    !window.hidden &&
+    !parkedWindows[window.internalId.toString()] &&
+    !isTransientOf(window, hidden) &&
+    isOnCurrentDesktop(window) &&
+    isOnCurrentActivity(window) &&
+    (!options.separateScreenFocus || !screen || String(window.output.name) === screen);
+const desktopWindowFor = (screen) => {
+    const desktops = Array.from(workspace.stackingOrder)
+        .reverse()
+        .filter((window) => window.desktopWindow && !window.minimized && isOnCurrentDesktop(window));
+    return desktops.find((window) => String(window.output.name) === screen) || desktops[0] || null;
+};
+// Picks where focus goes once `hidden` is hidden: the most recently active eligible window,
+// else the topmost one, else the desktop.
+const nextFocus = (hidden, screen) => {
+    const eligible = (window) => takesFocusAfterHide(window, hidden, screen);
+    return (
+        recentlyActive.find(eligible) ||
+        Array.from(workspace.stackingOrder).reverse().find(eligible) ||
+        desktopWindowFor(screen)
+    );
+};
+// Moves focus off a hidden window that still has it, so typing does not go to a window the
+// user cannot see. `screen` is the screen the window was shown on, as a parked window's own
+// output is wherever it was parked.
+cmds["RELEASE_FOCUS"] = (params) => {
+    const hidden = kwin.getWindowByInternalId(params.internalId);
+    if (!hidden || workspace.activeWindow !== hidden || !options.focusPolicyIsReasonable) {
+        return { activated: null };
+    }
+    const next = nextFocus(hidden, params.screen);
+    // null focuses nothing, which still beats typing into a hidden window.
+    kwin.setActiveWindow(next);
+    return { activated: next ? describeWindow(next) : null };
+};
 cmds["REGISTER_HOT_KEY"] = (params) => {
     registerShortcut(params.name, params.title, params.sequence, () => {
         callDBus(
@@ -443,6 +536,7 @@ cmds["REGISTER_HOT_KEY"] = (params) => {
 
 const activationSignal = workspace.windowActivated || workspace.clientActivated;
 if (activationSignal) {
+    activationSignal.connect(rememberActivation);
     activationSignal.connect(bridge.onFocusChanged);
 }
 

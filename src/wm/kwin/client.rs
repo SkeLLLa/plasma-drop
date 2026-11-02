@@ -3,8 +3,8 @@ use crate::wm::kwin::proxies::{
     KGlobalAccelComponentProxy, KGlobalAccelProxy, KWinScriptingProxy, ShortcutInfo,
 };
 use crate::wm::kwin::types::{
-    CommandEnvelope, CursorPositionResponse, ResponseEnvelope, ScreenEntry, ScreensResponse,
-    WindowListResponse, WindowResponse,
+    CommandEnvelope, CursorPositionResponse, FocusReleasedResponse, ResponseEnvelope, ScreenEntry,
+    ScreensResponse, WindowListResponse, WindowResponse,
 };
 use crate::wm::{
     Decorations, FrameGeometry, HOTKEY_PREFIX, ManagedWindow, Minimized, ModesLeft, Point,
@@ -646,6 +646,16 @@ impl WindowManager for KWinClient {
         self.send_command::<Value>("UNPARK_WINDOW", json!({ "internalId": internal_id }))
             .await?;
         Ok(())
+    }
+
+    async fn release_focus(&self, internal_id: &str, screen: &str) -> Result<Option<String>> {
+        let response: FocusReleasedResponse = self
+            .send_command(
+                "RELEASE_FOCUS",
+                json!({ "internalId": internal_id, "screen": screen }),
+            )
+            .await?;
+        Ok(response.activated)
     }
 
     async fn update_window(&self, internal_id: &str, update: &WindowUpdate) -> Result<()> {
