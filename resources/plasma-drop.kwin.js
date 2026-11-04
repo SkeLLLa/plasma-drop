@@ -187,7 +187,7 @@ cmds["GET_SCREENS"] = () => ({
     })),
 });
 
-// Windows held in place by PARK_WINDOW or PIN_WINDOW, by id, as `{ parked, stop }`.
+// Windows held in place by PARK_WINDOW or PIN_WINDOW, by id, as `{ parked, reconcile, stop }`.
 const heldWindows = {};
 const release = (id) => {
     if (heldWindows[id]) {
@@ -206,15 +206,17 @@ const takeWindow = (params) => {
     return kwin.getWindowByInternalIdRequired(params.internalId);
 };
 
+// Copied field by field: a QRectF's fields need not be own enumerable properties.
+const copyRect = (g) => ({ x: g.x, y: g.y, width: g.width, height: g.height });
 // Move and resize stay separate frameGeometry assignments: see resizeTo.
 const moveTo = (window, x, y) => {
-    const geometry = Object.assign({}, window.frameGeometry);
+    const geometry = copyRect(window.frameGeometry);
     geometry.x = x;
     geometry.y = y;
     window.frameGeometry = geometry;
 };
 const resizeTo = (window, width, height) => {
-    const geometry = Object.assign({}, window.frameGeometry);
+    const geometry = copyRect(window.frameGeometry);
     // KWin snaps logical sizes to the output's device pixels, so on fractional scales the
     // frame differs from the requested size by less than a pixel. Re-requesting that size
     // sends a configure whose late ack restores the position it was sent with, which leaves
@@ -302,9 +304,7 @@ cmds["LEAVE_WINDOW_MODES"] = (params, cmdInfo) => {
     if (modeLeaves[id]) {
         modeLeaves[id]();
     }
-    // Copied field by field: a QRectF's fields need not be own enumerable properties.
-    const g = window.frameGeometry;
-    const pinned = { x: g.x, y: g.y, width: g.width, height: g.height };
+    const pinned = copyRect(window.frameGeometry);
     const expiresAt = Date.now() + MODE_LEAVE_EXPIRY_MS;
     // Answers at most once, even when X11 applies the change synchronously inside a setter.
     let done = false;
@@ -404,24 +404,123 @@ const fitsOnSomeScreen = (rect) =>
             rect.y + rect.height <= g.y + g.height + 1
         );
     });
+// Bumped on every output change. KWin re-places, maximizes or tiles windows for the new
+// layout before it emits the change, so a hold decides who changed a window only later.
+let outputEpoch = 0;
+const OUTPUT_SETTLE_MS = 500;
+// The union of all screens, or null while there are none.
+const screensBounds = () => {
+    const screens = Array.from(workspace.screens || []);
+    if (screens.length === 0) {
+        return null;
+    }
+    const bounds = { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity };
+    for (const output of screens) {
+        const g = output.geometry;
+        bounds.left = Math.min(bounds.left, g.x);
+        bounds.top = Math.min(bounds.top, g.y);
+        bounds.right = Math.max(bounds.right, g.x + g.width);
+        bounds.bottom = Math.max(bounds.bottom, g.y + g.height);
+    }
+    return bounds;
+};
+// The side of all screens a rect is parked on; mirrors hidden_rect_for_screens.
+const parkSide = (rect, b) => {
+    if (rect.y + rect.height <= b.top) {
+        return "above";
+    }
+    if (rect.y >= b.bottom) {
+        return "below";
+    }
+    if (rect.x + rect.width <= b.left) {
+        return "left";
+    }
+    return rect.x >= b.right ? "right" : null;
+};
+// Where a rect parked on `side` sits against the current screens; the other axis is kept.
+const parkPoint = (side, rect, b) => {
+    const point = { x: rect.x, y: rect.y };
+    if (side === "above") {
+        point.y = b.top - rect.height;
+    } else if (side === "below") {
+        point.y = b.bottom;
+    } else if (side === "left") {
+        point.x = b.left - rect.width;
+    } else {
+        point.x = b.right;
+    }
+    return point;
+};
+const hasModes = (window) => Boolean(window.tile) || !isNormal(window);
+const userDragging = (window) => Boolean(window.move || window.resize);
+const reconcileHolds = () => {
+    for (const id of Object.keys(heldWindows)) {
+        const held = heldWindows[id];
+        if (!held) {
+            continue;
+        }
+        try {
+            held.reconcile();
+        } catch (error) {
+            log.error(`could not re-apply hold on ${id}: ${errorMessage(error)}`);
+        }
+    }
+};
+let outputTimer = null;
+if (canDefer) {
+    outputTimer = new QTimer();
+    outputTimer.singleShot = true;
+    outputTimer.interval = OUTPUT_SETTLE_MS;
+    outputTimer.timeout.connect(reconcileHolds);
+}
+const onOutputsChanged = () => {
+    outputEpoch++;
+    if (outputTimer) {
+        outputTimer.start();
+    } else {
+        reconcileHolds();
+    }
+};
+for (const signal of [workspace.screensChanged, workspace.virtualScreenGeometryChanged]) {
+    if (signal) {
+        signal.connect(onOutputsChanged);
+    }
+}
 // Holds `window` at `target`'s position, and size when it has one. Only a move counts as
 // leaving it: the app may round its size, e.g. to whole terminal cells, and fighting that
 // would never end. `hold.what` names the window and `hold.where` the target in the logs.
+// A parked target follows the screens it was parked beside when the outputs change.
 const holdWindow = (window, target, hold) => {
     const id = window.internalId.toString();
     release(id);
     let restoring = false;
+    let stopped = false;
+    let reconciledEpoch = outputEpoch;
+    // Set when a reconcile left modes that the app has yet to acknowledge.
+    let reconcileDue = false;
     let burstStart = 0;
     let burstRestores = 0;
-    let settleTimer = null;
+    let deferTimer = null;
+    const bounds = hold.parked ? screensBounds() : null;
+    const side = bounds
+        ? parkSide(
+              { x: target.x, y: target.y, width: window.frameGeometry.width, height: window.frameGeometry.height },
+              bounds
+          )
+        : null;
     const isHeld = () => {
         const g = window.frameGeometry;
         return Math.abs(g.x - target.x) < 1 && Math.abs(g.y - target.y) < 1;
     };
+    const isPlaced = () => {
+        const g = window.frameGeometry;
+        const sized =
+            typeof target.width !== "number" ||
+            (Math.abs(g.width - target.width) < 1 && Math.abs(g.height - target.height) < 1);
+        return isHeld() && sized && !hasModes(window);
+    };
     // The user moving, resizing, tiling, maximizing or fullscreening a shown window wins.
-    const userTookOver = () =>
-        !hold.parked &&
-        Boolean(window.move || window.resize || window.tile || !isNormal(window));
+    const userOwns = () => !hold.parked && (userDragging(window) || hasModes(window));
     // A pinned window's output may be gone or rearranged for now; KWin moves the window
     // again once it is back, and the next show places it anew otherwise.
     const canRestore = () => hold.parked || fitsOnSomeScreen(target);
@@ -436,57 +535,122 @@ const holdWindow = (window, target, hold) => {
             restoring = false;
         }
     };
-    const restoreSettled = () => {
-        burstStart = Date.now();
-        burstRestores = 0;
-        if (window.deleted || isHeld()) {
+    const retargetPark = () => {
+        const current = screensBounds();
+        if (side && current) {
+            Object.assign(target, parkPoint(side, copyRect(window.frameGeometry), current));
+        }
+    };
+    const leaveModes = () => {
+        if (window.fullScreen) {
+            window.fullScreen = false;
+        }
+        if (window.maximizeMode) {
+            window.setMaximize(false, false);
+        }
+        if (window.tile) {
+            window.tile = null;
+        }
+    };
+    const reconcile = (cause = "after the outputs changed") => {
+        if (stopped || window.deleted) {
             return;
         }
-        if (userTookOver()) {
+        reconciledEpoch = outputEpoch;
+        if (hold.parked) {
+            retargetPark();
+        }
+        if (isPlaced() || !canRestore()) {
+            // An unplaceable pin is retried by the next output change.
+            reconcileDue = false;
+            return;
+        }
+        log.info(`moving ${hold.what} ${describeWindow(window)} ${hold.where} ${cause}`);
+        restoring = true;
+        try {
+            leaveModes();
+            moveTo(window, target.x, target.y);
+            if (typeof target.width === "number") {
+                resizeTo(window, target.width, target.height);
+            }
+            // Wayland applies leaving modes on the app's ack; the deferred run finishes then.
+            reconcileDue = hasModes(window);
+        } finally {
+            restoring = false;
+        }
+    };
+    const resetBurst = () => {
+        burstStart = Date.now();
+        burstRestores = 0;
+    };
+    const runDeferred = () => {
+        if (stopped || window.deleted) {
+            return;
+        }
+        resetBurst();
+        if (outputEpoch !== reconciledEpoch || reconcileDue) {
+            reconcile();
+        } else if (!canRestore()) {
+            // The output is gone, so what KWin did is not the user's; the returning output
+            // re-applies the pin.
+        } else if (userOwns()) {
+            // A mode change without an output change is the user's.
             release(id);
-        } else if (canRestore()) {
+        } else if (hasModes(window)) {
+            reconcile("after a mode change");
+        } else if (!isHeld() && canRestore()) {
             log.info(
                 `moving ${hold.what} ${describeWindow(window)} ${hold.where} after a burst of moves`
             );
             restore();
         }
     };
+    // Restarted by every event, so it fires once they have stopped.
+    const queue = () => {
+        if (deferTimer) {
+            deferTimer.start();
+        } else {
+            runDeferred();
+        }
+    };
     if (canDefer) {
-        settleTimer = new QTimer();
-        settleTimer.singleShot = true;
-        settleTimer.interval = HOLD_SETTLE_MS;
-        settleTimer.timeout.connect(restoreSettled);
+        deferTimer = new QTimer();
+        deferTimer.singleShot = true;
+        deferTimer.interval = HOLD_SETTLE_MS;
+        deferTimer.timeout.connect(runDeferred);
     }
     const onBurst = () => {
-        if (!settleTimer) {
+        if (!deferTimer) {
             log.error(`${hold.what} ${describeWindow(window)} keeps moving; no longer holding it`);
             release(id);
             return;
         }
-        if (!settleTimer.active) {
+        if (!deferTimer.active) {
             log.info(
                 `${hold.what} ${describeWindow(window)} keeps moving; ` +
                     `moving it ${hold.where} once the moves stop`
             );
         }
-        // Restarted by every move, so it fires once the burst is over.
-        settleTimer.start();
+        queue();
     };
     const keep = () => {
-        if (restoring || isHeld()) {
+        if (restoring || stopped) {
             return;
         }
-        if (userTookOver()) {
+        if (!hold.parked && userDragging(window)) {
             release(id);
             return;
         }
-        if (!canRestore()) {
+        if (hasModes(window) || reconcileDue) {
+            queue();
+            return;
+        }
+        if (isHeld() || !canRestore()) {
             return;
         }
         const now = Date.now();
         if (now - burstStart > 1000) {
-            burstStart = now;
-            burstRestores = 0;
+            resetBurst();
         }
         if (++burstRestores > HOLD_MAX_RESTORES_PER_SECOND) {
             onBurst();
@@ -500,22 +664,41 @@ const holdWindow = (window, target, hold) => {
         );
         restore();
     };
+    const onModes = () => {
+        if (!restoring && !stopped) {
+            queue();
+        }
+    };
+    const onInteractive = () => {
+        if (!hold.parked) {
+            release(id);
+        }
+    };
     const removed = (closed) => {
         if (closed === window) {
             release(id);
         }
     };
-    window.frameGeometryChanged.connect(keep);
-    workspace.windowRemoved.connect(removed);
+    // A missing signal only loses its case instead of throwing.
+    const signals = [
+        [window.frameGeometryChanged, keep],
+        [window.maximizedChanged, onModes],
+        [window.fullScreenChanged, onModes],
+        [window.tileChanged, onModes],
+        [window.interactiveMoveResizeStarted, onInteractive],
+        [workspace.windowRemoved, removed],
+    ].filter(([signal]) => signal);
+    signals.forEach(([signal, slot]) => signal.connect(slot));
     heldWindows[id] = {
         parked: hold.parked,
+        reconcile: () => reconcile(),
         stop: () => {
-            if (settleTimer) {
-                settleTimer.stop();
-                settleTimer.timeout.disconnect(restoreSettled);
+            stopped = true;
+            if (deferTimer) {
+                deferTimer.stop();
+                deferTimer.timeout.disconnect(runDeferred);
             }
-            window.frameGeometryChanged.disconnect(keep);
-            workspace.windowRemoved.disconnect(removed);
+            signals.forEach(([signal, slot]) => signal.disconnect(slot));
             delete heldWindows[id];
         },
     };
@@ -585,6 +768,8 @@ const isTransientOf = (window, root) => {
     }
     return false;
 };
+// Empty while KWin reconfigures outputs: the window's output is null then.
+const outputName = (window) => (window.output ? String(window.output.name) : "");
 // Whether focus may move to `window` once `hidden` is hidden: KWin's own choice of the next
 // window, plus skipping switcher-hidden helpers (e.g. the invisible xwaylandvideobridge) and
 // the hidden app's dialogs, which would take the input back to the hidden app.
@@ -601,12 +786,12 @@ const takesFocusAfterHide = (window, hidden, screen) =>
     !isTransientOf(window, hidden) &&
     isOnCurrentDesktop(window) &&
     isOnCurrentActivity(window) &&
-    (!options.separateScreenFocus || !screen || String(window.output.name) === screen);
+    (!options.separateScreenFocus || !screen || outputName(window) === screen);
 const desktopWindowFor = (screen) => {
     const desktops = Array.from(workspace.stackingOrder)
         .reverse()
         .filter((window) => window.desktopWindow && !window.minimized && isOnCurrentDesktop(window));
-    return desktops.find((window) => String(window.output.name) === screen) || desktops[0] || null;
+    return desktops.find((window) => outputName(window) === screen) || desktops[0] || null;
 };
 // Picks where focus goes once `hidden` is hidden: the most recently active eligible window,
 // else the topmost one, else the desktop.
@@ -647,10 +832,7 @@ cmds["REGISTER_HOT_KEY"] = (params) => {
     return {};
 };
 
-const activationSignal = workspace.windowActivated || workspace.clientActivated;
-if (activationSignal) {
-    activationSignal.connect(rememberActivation);
-    activationSignal.connect(bridge.onFocusChanged);
-}
+workspace.windowActivated.connect(rememberActivation);
+workspace.windowActivated.connect(bridge.onFocusChanged);
 
 bridge.getNextCommand();

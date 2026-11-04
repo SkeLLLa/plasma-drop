@@ -309,6 +309,7 @@ impl WindowManager for MockKWin {
     }
 
     async fn pin_window(&self, internal_id: &str, geometry: &FrameGeometry) -> Result<()> {
+        self.parked.lock().await.remove(internal_id);
         self.pinned
             .lock()
             .await
