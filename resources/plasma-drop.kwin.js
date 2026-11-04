@@ -187,6 +187,21 @@ cmds["GET_SCREENS"] = () => ({
     })),
 });
 
+// Windows held in place by PARK_WINDOW or PIN_WINDOW, by id, as `{ parked, stop }`.
+const heldWindows = {};
+// The daemon taking over a window's geometry ends any pin; see PIN_WINDOW.
+const releasePin = (id) => {
+    const held = heldWindows[id];
+    if (held && !held.parked) {
+        held.stop();
+    }
+};
+// The window a command names, freed from any pin.
+const takeWindow = (params) => {
+    releasePin(params.internalId);
+    return kwin.getWindowByInternalIdRequired(params.internalId);
+};
+
 // Move and resize stay separate frameGeometry assignments: see resizeTo.
 const moveTo = (window, x, y) => {
     const geometry = Object.assign({}, window.frameGeometry);
@@ -216,16 +231,16 @@ const setOpacity = (window, value) => {
 };
 
 cmds["MOVE_WINDOW"] = (params) => {
-    moveTo(kwin.getWindowByInternalIdRequired(params.internalId), params.x, params.y);
+    moveTo(takeWindow(params), params.x, params.y);
     return {};
 };
 cmds["RESIZE_WINDOW"] = (params) => {
-    resizeTo(kwin.getWindowByInternalIdRequired(params.internalId), params.width, params.height);
+    resizeTo(takeWindow(params), params.width, params.height);
     return {};
 };
 // One animation frame in one round trip: move, then resize, then opacity, each optional.
 cmds["SET_WINDOW_STATE"] = (params) => {
-    const window = kwin.getWindowByInternalIdRequired(params.internalId);
+    const window = takeWindow(params);
     if (typeof params.x === "number" && typeof params.y === "number") {
         moveTo(window, params.x, params.y);
     }
@@ -246,7 +261,7 @@ cmds["SET_WINDOW_NO_BORDER"] = (params) => {
 // Wayland both changes complete once the app acknowledges them. Fullscreen is left before
 // and entered after the maximize change, so the maximize applies to the normal window.
 cmds["SET_WINDOW_MODES"] = (params) => {
-    const window = kwin.getWindowByInternalIdRequired(params.internalId);
+    const window = takeWindow(params);
     const vertically = Boolean(params.maximizedVertically);
     const horizontally = Boolean(params.maximizedHorizontally);
     const fullScreen = Boolean(params.fullScreen);
@@ -275,7 +290,7 @@ const sameRect = (a, b) =>
 // in either order. The bridge keeps polling meanwhile; the daemon stops waiting after its
 // own timeout, and a later answer is dropped.
 cmds["LEAVE_WINDOW_MODES"] = (params, cmdInfo) => {
-    const window = kwin.getWindowByInternalIdRequired(params.internalId);
+    const window = takeWindow(params);
     if (isNormal(window)) {
         return { window: mapWindow(window) };
     }
@@ -333,12 +348,12 @@ cmds["LEAVE_WINDOW_MODES"] = (params, cmdInfo) => {
 };
 // Moves a window to the named output; KWin refits a fullscreen window to it.
 cmds["SEND_WINDOW_TO_SCREEN"] = (params) => {
-    const window = kwin.getWindowByInternalIdRequired(params.internalId);
+    const window = takeWindow(params);
     workspace.sendClientToScreen(window, kwin.getScreenByNameRequired(params.screen));
     return {};
 };
 cmds["MINIMIZE_WINDOW"] = (params) => {
-    const window = kwin.getWindowByInternalIdRequired(params.internalId);
+    const window = takeWindow(params);
     window.minimized = Boolean(params.minimized);
     return {};
 };
@@ -355,54 +370,76 @@ cmds["MOVE_WINDOW_TO_CURRENT_DESKTOP"] = (params) => {
     }
     return {};
 };
-// Windows parked offscreen by a hide, by id, each a function that stops guarding it.
-// KWin pulls an offscreen window back onto a screen whenever the app acknowledges a
-// configure, e.g. after the window loses focus or the work area changes, so a parked
-// window is moved back to where it was parked.
-const parkedWindows = {};
+// A hide parks its window offscreen and a show pins it where it was placed. KWin pulls an
+// offscreen window back onto a screen whenever the app acknowledges a configure, e.g. after
+// the window loses focus or the work area changes, and re-places a shown one when its
+// output is reconfigured, e.g. while the screen dims. A held window is moved back.
 // More restores than this within a second means a burst of moves, e.g. KWin re-checking
 // window positions on every step of a screen dimming animation. The guard then stops
-// fighting each move and restores once the moves have stopped for PARK_SETTLE_MS.
-const PARK_MAX_RESTORES_PER_SECOND = 10;
-const PARK_SETTLE_MS = 300;
+// fighting each move and restores once the moves have stopped for HOLD_SETTLE_MS.
+const HOLD_MAX_RESTORES_PER_SECOND = 10;
+const HOLD_SETTLE_MS = 300;
 // KWin exposes QTimer to scripts; without it the guard gives up on a burst instead.
 const canDefer = typeof QTimer === "function";
-const unpark = (id) => {
-    if (parkedWindows[id]) {
-        parkedWindows[id]();
+const release = (id) => {
+    if (heldWindows[id]) {
+        heldWindows[id].stop();
     }
+};
+const isParked = (window) => {
+    const held = heldWindows[window.internalId.toString()];
+    return Boolean(held && held.parked);
 };
 const describeWindow = (window) =>
     `${window.internalId} (${window.resourceClass || "?"}: ${
         window.desktopWindow ? "desktop" : window.caption || ""
     })`;
-cmds["PARK_WINDOW"] = (params) => {
-    const window = kwin.getWindowByInternalIdRequired(params.internalId);
-    const id = params.internalId;
-    unpark(id);
+const isOnSomeScreen = (target) =>
+    Array.from(workspace.screens || []).some((output) => {
+        const g = output.geometry;
+        return (
+            target.x >= g.x &&
+            target.y >= g.y &&
+            target.x < g.x + g.width &&
+            target.y < g.y + g.height
+        );
+    });
+// Holds `window` at `target`'s position, and size when it has one. Only a move counts as
+// leaving it: the app may round its size, e.g. to whole terminal cells, and fighting that
+// would never end. `hold.what` names the window and `hold.where` the target in the logs.
+const holdWindow = (window, target, hold) => {
+    const id = window.internalId.toString();
+    release(id);
     let restoring = false;
     let burstStart = 0;
     let burstRestores = 0;
-    const isParked = () => {
+    let settleTimer = null;
+    const isHeld = () => {
         const g = window.frameGeometry;
-        return Math.abs(g.x - params.x) < 1 && Math.abs(g.y - params.y) < 1;
+        return Math.abs(g.x - target.x) < 1 && Math.abs(g.y - target.y) < 1;
     };
     const restore = () => {
+        // A pinned window's output may be gone for now; KWin moves the window again once
+        // it is back.
+        if (!hold.parked && !isOnSomeScreen(target)) {
+            return;
+        }
         restoring = true;
         try {
-            moveTo(window, params.x, params.y);
+            moveTo(window, target.x, target.y);
+            if (typeof target.width === "number") {
+                resizeTo(window, target.width, target.height);
+            }
         } finally {
             restoring = false;
         }
     };
-    let settleTimer = null;
     const restoreSettled = () => {
         burstStart = Date.now();
         burstRestores = 0;
-        if (!window.deleted && !isParked()) {
+        if (!window.deleted && !isHeld()) {
             log.info(
-                `moving hidden window ${describeWindow(window)} back offscreen ` +
-                    "after a burst of moves"
+                `moving ${hold.what} ${describeWindow(window)} ${hold.where} after a burst of moves`
             );
             restore();
         }
@@ -410,65 +447,88 @@ cmds["PARK_WINDOW"] = (params) => {
     if (canDefer) {
         settleTimer = new QTimer();
         settleTimer.singleShot = true;
-        settleTimer.interval = PARK_SETTLE_MS;
+        settleTimer.interval = HOLD_SETTLE_MS;
         settleTimer.timeout.connect(restoreSettled);
     }
-    const keep = () => {
-        if (restoring || isParked()) {
+    const onBurst = () => {
+        if (!settleTimer) {
+            log.error(`${hold.what} ${describeWindow(window)} keeps moving; no longer holding it`);
+            release(id);
             return;
         }
-        const g = window.frameGeometry;
+        if (!settleTimer.active) {
+            log.info(
+                `${hold.what} ${describeWindow(window)} keeps moving; ` +
+                    `moving it ${hold.where} once the moves stop`
+            );
+        }
+        // Restarted by every move, so it fires once the burst is over.
+        settleTimer.start();
+    };
+    const keep = () => {
+        if (restoring || isHeld()) {
+            return;
+        }
+        // The user moving, resizing, maximizing or fullscreening a shown window wins.
+        if (!hold.parked && (window.move || window.resize || !isNormal(window))) {
+            release(id);
+            return;
+        }
         const now = Date.now();
         if (now - burstStart > 1000) {
             burstStart = now;
             burstRestores = 0;
         }
-        if (++burstRestores > PARK_MAX_RESTORES_PER_SECOND) {
-            if (!settleTimer) {
-                log.error(
-                    `hidden window ${describeWindow(window)} keeps moving back on screen; ` +
-                        "no longer keeping it offscreen"
-                );
-                unpark(id);
-                return;
-            }
-            if (!settleTimer.active) {
-                log.info(
-                    `hidden window ${describeWindow(window)} keeps moving back on screen; ` +
-                        "moving it back offscreen once the moves stop"
-                );
-            }
-            // Restarted by every move, so it fires once the burst is over.
-            settleTimer.start();
+        if (++burstRestores > HOLD_MAX_RESTORES_PER_SECOND) {
+            onBurst();
             return;
         }
+        const g = window.frameGeometry;
         log.info(
-            `KWin moved hidden window ${describeWindow(window)} to ` +
-                `${Math.round(g.x)},${Math.round(g.y)}; moving it back offscreen to ` +
-                `${params.x},${params.y}`
+            `KWin moved ${hold.what} ${describeWindow(window)} to ` +
+                `${Math.round(g.x)},${Math.round(g.y)}; moving it ${hold.where} to ` +
+                `${target.x},${target.y}`
         );
         restore();
     };
     const removed = (closed) => {
         if (closed === window) {
-            unpark(id);
+            release(id);
         }
     };
     window.frameGeometryChanged.connect(keep);
     workspace.windowRemoved.connect(removed);
-    parkedWindows[id] = () => {
-        if (settleTimer) {
-            settleTimer.stop();
-            settleTimer.timeout.disconnect(restoreSettled);
-        }
-        window.frameGeometryChanged.disconnect(keep);
-        workspace.windowRemoved.disconnect(removed);
-        delete parkedWindows[id];
+    heldWindows[id] = {
+        parked: hold.parked,
+        stop: () => {
+            if (settleTimer) {
+                settleTimer.stop();
+                settleTimer.timeout.disconnect(restoreSettled);
+            }
+            window.frameGeometryChanged.disconnect(keep);
+            workspace.windowRemoved.disconnect(removed);
+            delete heldWindows[id];
+        },
     };
+};
+cmds["PARK_WINDOW"] = (params) => {
+    holdWindow(
+        kwin.getWindowByInternalIdRequired(params.internalId),
+        { x: params.x, y: params.y },
+        { parked: true, what: "hidden window", where: "back offscreen" }
+    );
+    return {};
+};
+cmds["PIN_WINDOW"] = (params) => {
+    holdWindow(
+        kwin.getWindowByInternalIdRequired(params.internalId),
+        { x: params.x, y: params.y, width: params.width, height: params.height },
+        { parked: false, what: "shown window", where: "back into place" }
+    );
     return {};
 };
 cmds["UNPARK_WINDOW"] = (params) => {
-    unpark(params.internalId);
+    release(params.internalId);
     return {};
 };
 
@@ -528,7 +588,7 @@ const takesFocusAfterHide = (window, hidden, screen) =>
     !window.skipSwitcher &&
     !window.minimized &&
     !window.hidden &&
-    !parkedWindows[window.internalId.toString()] &&
+    !isParked(window) &&
     !isTransientOf(window, hidden) &&
     isOnCurrentDesktop(window) &&
     isOnCurrentActivity(window) &&

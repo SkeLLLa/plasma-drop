@@ -43,8 +43,12 @@ pub trait WindowManager: Send + Sync {
     /// Keeps a window hidden offscreen at `position`, moving it back whenever the window
     /// manager pulls it onto a screen, until [`Self::unpark_window`].
     async fn park_window(&self, internal_id: &str, position: Point) -> Result<()>;
-    /// Stops keeping the window where [`Self::park_window`] put it; a no-op when it is not
-    /// parked.
+    /// Keeps a shown window at `geometry`, moving it back whenever the window manager
+    /// re-places it, until the user moves it, or [`Self::unpark_window`], a park or any
+    /// other geometry change from the daemon.
+    async fn pin_window(&self, internal_id: &str, geometry: &FrameGeometry) -> Result<()>;
+    /// Stops keeping the window where [`Self::park_window`] or [`Self::pin_window`] put it;
+    /// a no-op when it is not held.
     async fn unpark_window(&self, internal_id: &str) -> Result<()>;
     /// Moves focus off a hidden window that still has it, to the window the user most
     /// recently used on `screen`, the screen it was shown on. Returns a description of the

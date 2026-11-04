@@ -642,6 +642,21 @@ impl WindowManager for KWinClient {
         Ok(())
     }
 
+    async fn pin_window(&self, internal_id: &str, geometry: &FrameGeometry) -> Result<()> {
+        self.send_command::<Value>(
+            "PIN_WINDOW",
+            json!({
+                "internalId": internal_id,
+                "x": geometry.x,
+                "y": geometry.y,
+                "width": geometry.width,
+                "height": geometry.height,
+            }),
+        )
+        .await?;
+        Ok(())
+    }
+
     async fn unpark_window(&self, internal_id: &str) -> Result<()> {
         self.send_command::<Value>("UNPARK_WINDOW", json!({ "internalId": internal_id }))
             .await?;

@@ -108,6 +108,9 @@ struct MockKWin {
     /// Windows kept offscreen by `park_window`, by id. Kept out of `calls` so call-order
     /// assertions stay about placement.
     parked: Mutex<HashMap<String, Point>>,
+    /// Windows kept in place by `pin_window`, by id. Like the `KWin` script, any move, a park
+    /// or an unpark drops a pin.
+    pinned: Mutex<HashMap<String, FrameGeometry>>,
     /// `release_focus` calls as `id@screen`, kept out of `calls` like `parked`.
     released: Mutex<Vec<String>>,
     /// Makes every `release_focus` call fail.
@@ -186,6 +189,7 @@ impl WindowManager for MockKWin {
         if self.fail_moves || self.fails_for(internal_id) {
             bail!("move failed for {internal_id}");
         }
+        self.pinned.lock().await.remove(internal_id);
         self.calls.lock().await.push(format!(
             "move:{internal_id}:{}:{}:{}:{}",
             geometry.x, geometry.y, geometry.width, geometry.height
@@ -290,6 +294,7 @@ impl WindowManager for MockKWin {
     }
 
     async fn park_window(&self, internal_id: &str, position: Point) -> Result<()> {
+        self.pinned.lock().await.remove(internal_id);
         self.parked
             .lock()
             .await
@@ -297,8 +302,17 @@ impl WindowManager for MockKWin {
         Ok(())
     }
 
+    async fn pin_window(&self, internal_id: &str, geometry: &FrameGeometry) -> Result<()> {
+        self.pinned
+            .lock()
+            .await
+            .insert(internal_id.to_string(), *geometry);
+        Ok(())
+    }
+
     async fn unpark_window(&self, internal_id: &str) -> Result<()> {
         self.parked.lock().await.remove(internal_id);
+        self.pinned.lock().await.remove(internal_id);
         Ok(())
     }
 
@@ -854,6 +868,43 @@ async fn toggle_on_releases_the_parked_window() {
     service.toggle_app("dolphin").await.unwrap();
 
     assert!(kwin.parked.lock().await.is_empty());
+}
+
+#[tokio::test]
+async fn toggle_on_pins_the_window_where_it_was_placed_until_hidden() {
+    let managed = managed_app(app("dolphin", "super+f9", "dolphin"), "{abc}");
+    let registry = Arc::new(Mutex::new(AppRegistry::new(vec![managed])));
+    let kwin = mock_kwin(Some(window(
+        "{abc}",
+        "dolphin",
+        "Dolphin",
+        geometry(10, 20, 300, 400),
+    )));
+    let service = ToggleService::new(registry, Arc::<MockKWin>::clone(&kwin), vec![screen()]);
+
+    service.toggle_app("dolphin").await.unwrap();
+    let placed = kwin
+        .calls
+        .lock()
+        .await
+        .iter()
+        .rev()
+        .find(|call| call.starts_with("move:"))
+        .cloned()
+        .unwrap();
+    let pinned = kwin.pinned.lock().await.clone();
+    assert_eq!(pinned.len(), 1);
+    let pin = pinned["{abc}"];
+    assert!(
+        placed.ends_with(&format!(
+            "{{abc}}:{}:{}:{}:{}",
+            pin.x, pin.y, pin.width, pin.height
+        )),
+        "pinned at {pin:?}, placed by {placed}"
+    );
+    service.toggle_app("dolphin").await.unwrap();
+
+    assert!(kwin.pinned.lock().await.is_empty());
 }
 
 #[tokio::test]
