@@ -360,9 +360,13 @@ cmds["MOVE_WINDOW_TO_CURRENT_DESKTOP"] = (params) => {
 // configure, e.g. after the window loses focus or the work area changes, so a parked
 // window is moved back to where it was parked.
 const parkedWindows = {};
-// More restores than this within a second means something keeps moving the window on
-// purpose; the guard then gives up rather than fight it.
+// More restores than this within a second means a burst of moves, e.g. KWin re-checking
+// window positions on every step of a screen dimming animation. The guard then stops
+// fighting each move and restores once the moves have stopped for PARK_SETTLE_MS.
 const PARK_MAX_RESTORES_PER_SECOND = 10;
+const PARK_SETTLE_MS = 300;
+// KWin exposes QTimer to scripts; without it the guard gives up on a burst instead.
+const canDefer = typeof QTimer === "function";
 const unpark = (id) => {
     if (parkedWindows[id]) {
         parkedWindows[id]();
@@ -379,22 +383,63 @@ cmds["PARK_WINDOW"] = (params) => {
     let restoring = false;
     let burstStart = 0;
     let burstRestores = 0;
-    const keep = () => {
+    const isParked = () => {
         const g = window.frameGeometry;
-        if (restoring || (Math.abs(g.x - params.x) < 1 && Math.abs(g.y - params.y) < 1)) {
+        return Math.abs(g.x - params.x) < 1 && Math.abs(g.y - params.y) < 1;
+    };
+    const restore = () => {
+        restoring = true;
+        try {
+            moveTo(window, params.x, params.y);
+        } finally {
+            restoring = false;
+        }
+    };
+    let settleTimer = null;
+    const restoreSettled = () => {
+        burstStart = Date.now();
+        burstRestores = 0;
+        if (!window.deleted && !isParked()) {
+            log.info(
+                `moving hidden window ${describeWindow(window)} back offscreen ` +
+                    "after a burst of moves"
+            );
+            restore();
+        }
+    };
+    if (canDefer) {
+        settleTimer = new QTimer();
+        settleTimer.singleShot = true;
+        settleTimer.interval = PARK_SETTLE_MS;
+        settleTimer.timeout.connect(restoreSettled);
+    }
+    const keep = () => {
+        if (restoring || isParked()) {
             return;
         }
+        const g = window.frameGeometry;
         const now = Date.now();
         if (now - burstStart > 1000) {
             burstStart = now;
             burstRestores = 0;
         }
         if (++burstRestores > PARK_MAX_RESTORES_PER_SECOND) {
-            log.error(
-                `hidden window ${describeWindow(window)} keeps moving back on screen; ` +
-                    "no longer keeping it offscreen"
-            );
-            unpark(id);
+            if (!settleTimer) {
+                log.error(
+                    `hidden window ${describeWindow(window)} keeps moving back on screen; ` +
+                        "no longer keeping it offscreen"
+                );
+                unpark(id);
+                return;
+            }
+            if (!settleTimer.active) {
+                log.info(
+                    `hidden window ${describeWindow(window)} keeps moving back on screen; ` +
+                        "moving it back offscreen once the moves stop"
+                );
+            }
+            // Restarted by every move, so it fires once the burst is over.
+            settleTimer.start();
             return;
         }
         log.info(
@@ -402,12 +447,7 @@ cmds["PARK_WINDOW"] = (params) => {
                 `${Math.round(g.x)},${Math.round(g.y)}; moving it back offscreen to ` +
                 `${params.x},${params.y}`
         );
-        restoring = true;
-        try {
-            moveTo(window, params.x, params.y);
-        } finally {
-            restoring = false;
-        }
+        restore();
     };
     const removed = (closed) => {
         if (closed === window) {
@@ -417,6 +457,10 @@ cmds["PARK_WINDOW"] = (params) => {
     window.frameGeometryChanged.connect(keep);
     workspace.windowRemoved.connect(removed);
     parkedWindows[id] = () => {
+        if (settleTimer) {
+            settleTimer.stop();
+            settleTimer.timeout.disconnect(restoreSettled);
+        }
         window.frameGeometryChanged.disconnect(keep);
         workspace.windowRemoved.disconnect(removed);
         delete parkedWindows[id];
