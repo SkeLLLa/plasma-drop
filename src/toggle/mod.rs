@@ -296,8 +296,9 @@ impl ToggleService {
         {
             tokio::time::sleep(LAUNCH_SETTLE_DELAY).await;
             // Best effort: the show itself already succeeded.
-            if let Err(error) = self.apply_geometry(&internal_id, &visible).await {
-                warn!("could not re-apply the placement of '{app_name}': {error:#}");
+            match self.apply_geometry(&internal_id, &visible).await {
+                Ok(()) => self.pin_window(&internal_id, &visible).await,
+                Err(error) => warn!("could not re-apply the placement of '{app_name}': {error:#}"),
             }
         }
         Ok(())
@@ -338,8 +339,19 @@ impl ToggleService {
         // `prepare_show` already tracks the window.
         self.registry.lock().await.mark_visible(app_name);
         placed?;
+        if let ShowPlacement::Rects { visible, .. } = &placement {
+            self.pin_window(&window.internal_id, visible).await;
+        }
         info!("showed app '{app_name}'");
         Ok(placement)
+    }
+
+    /// Keeps a shown window where it was placed, best effort: `KWin` re-places windows when
+    /// an output is reconfigured, e.g. while the screen dims, which leaves it floating.
+    async fn pin_window(&self, internal_id: &str, geometry: &FrameGeometry) {
+        if let Err(error) = self.kwin.pin_window(internal_id, geometry).await {
+            warn!("could not pin window {internal_id} in place: {error:#}");
+        }
     }
 
     /// Readies `window` for a show and returns how to place it.
