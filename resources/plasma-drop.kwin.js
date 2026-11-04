@@ -189,11 +189,15 @@ cmds["GET_SCREENS"] = () => ({
 
 // Windows held in place by PARK_WINDOW or PIN_WINDOW, by id, as `{ parked, stop }`.
 const heldWindows = {};
+const release = (id) => {
+    if (heldWindows[id]) {
+        heldWindows[id].stop();
+    }
+};
 // The daemon taking over a window's geometry ends any pin; see PIN_WINDOW.
 const releasePin = (id) => {
-    const held = heldWindows[id];
-    if (held && !held.parked) {
-        held.stop();
+    if (heldWindows[id] && !heldWindows[id].parked) {
+        release(id);
     }
 };
 // The window a command names, freed from any pin.
@@ -253,7 +257,7 @@ cmds["SET_WINDOW_STATE"] = (params) => {
     return {};
 };
 cmds["SET_WINDOW_NO_BORDER"] = (params) => {
-    const window = kwin.getWindowByInternalIdRequired(params.internalId);
+    const window = takeWindow(params);
     window.noBorder = Boolean(params.noBorder);
     return {};
 };
@@ -381,11 +385,6 @@ const HOLD_MAX_RESTORES_PER_SECOND = 10;
 const HOLD_SETTLE_MS = 300;
 // KWin exposes QTimer to scripts; without it the guard gives up on a burst instead.
 const canDefer = typeof QTimer === "function";
-const release = (id) => {
-    if (heldWindows[id]) {
-        heldWindows[id].stop();
-    }
-};
 const isParked = (window) => {
     const held = heldWindows[window.internalId.toString()];
     return Boolean(held && held.parked);
@@ -394,14 +393,15 @@ const describeWindow = (window) =>
     `${window.internalId} (${window.resourceClass || "?"}: ${
         window.desktopWindow ? "desktop" : window.caption || ""
     })`;
-const isOnSomeScreen = (target) =>
+// Whether `rect` lies within one screen, give or take the rounding of fractional scales.
+const fitsOnSomeScreen = (rect) =>
     Array.from(workspace.screens || []).some((output) => {
         const g = output.geometry;
         return (
-            target.x >= g.x &&
-            target.y >= g.y &&
-            target.x < g.x + g.width &&
-            target.y < g.y + g.height
+            rect.x >= g.x - 1 &&
+            rect.y >= g.y - 1 &&
+            rect.x + rect.width <= g.x + g.width + 1 &&
+            rect.y + rect.height <= g.y + g.height + 1
         );
     });
 // Holds `window` at `target`'s position, and size when it has one. Only a move counts as
@@ -418,12 +418,14 @@ const holdWindow = (window, target, hold) => {
         const g = window.frameGeometry;
         return Math.abs(g.x - target.x) < 1 && Math.abs(g.y - target.y) < 1;
     };
+    // The user moving, resizing, tiling, maximizing or fullscreening a shown window wins.
+    const userTookOver = () =>
+        !hold.parked &&
+        Boolean(window.move || window.resize || window.tile || !isNormal(window));
+    // A pinned window's output may be gone or rearranged for now; KWin moves the window
+    // again once it is back, and the next show places it anew otherwise.
+    const canRestore = () => hold.parked || fitsOnSomeScreen(target);
     const restore = () => {
-        // A pinned window's output may be gone for now; KWin moves the window again once
-        // it is back.
-        if (!hold.parked && !isOnSomeScreen(target)) {
-            return;
-        }
         restoring = true;
         try {
             moveTo(window, target.x, target.y);
@@ -437,7 +439,12 @@ const holdWindow = (window, target, hold) => {
     const restoreSettled = () => {
         burstStart = Date.now();
         burstRestores = 0;
-        if (!window.deleted && !isHeld()) {
+        if (window.deleted || isHeld()) {
+            return;
+        }
+        if (userTookOver()) {
+            release(id);
+        } else if (canRestore()) {
             log.info(
                 `moving ${hold.what} ${describeWindow(window)} ${hold.where} after a burst of moves`
             );
@@ -469,9 +476,11 @@ const holdWindow = (window, target, hold) => {
         if (restoring || isHeld()) {
             return;
         }
-        // The user moving, resizing, maximizing or fullscreening a shown window wins.
-        if (!hold.parked && (window.move || window.resize || !isNormal(window))) {
+        if (userTookOver()) {
             release(id);
+            return;
+        }
+        if (!canRestore()) {
             return;
         }
         const now = Date.now();

@@ -831,6 +831,8 @@ impl ToggleService {
         let Some(window) = self.kwin.window(window_id).await? else {
             return Ok(());
         };
+        // Otherwise the script moves the restored window back offscreen or into place.
+        self.kwin.unpark_window(window_id).await?;
 
         // Only a window plasma-drop minimized itself; one the user minimized stays so.
         if minimized_by_hide == Minimized::Yes && window.minimized {

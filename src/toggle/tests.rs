@@ -108,8 +108,8 @@ struct MockKWin {
     /// Windows kept offscreen by `park_window`, by id. Kept out of `calls` so call-order
     /// assertions stay about placement.
     parked: Mutex<HashMap<String, Point>>,
-    /// Windows kept in place by `pin_window`, by id. Like the `KWin` script, any move, a park
-    /// or an unpark drops a pin.
+    /// Windows kept in place by `pin_window`, by id. Like the `KWin` script, any geometry,
+    /// mode or decoration change, a park or an unpark drops a pin.
     pinned: Mutex<HashMap<String, FrameGeometry>>,
     /// `release_focus` calls as `id@screen`, kept out of `calls` like `parked`.
     released: Mutex<Vec<String>>,
@@ -198,6 +198,7 @@ impl WindowManager for MockKWin {
     }
 
     async fn resize_window(&self, internal_id: &str, geometry: &FrameGeometry) -> Result<()> {
+        self.pinned.lock().await.remove(internal_id);
         self.calls.lock().await.push(format!(
             "resize:{internal_id}:{}:{}:{}:{}",
             geometry.x, geometry.y, geometry.width, geometry.height
@@ -210,6 +211,7 @@ impl WindowManager for MockKWin {
         internal_id: &str,
         decorations: Decorations,
     ) -> Result<()> {
+        self.pinned.lock().await.remove(internal_id);
         let no_border = decorations == Decorations::Hidden;
         self.calls
             .lock()
@@ -219,6 +221,7 @@ impl WindowManager for MockKWin {
     }
 
     async fn minimize_window(&self, internal_id: &str, minimized: Minimized) -> Result<()> {
+        self.pinned.lock().await.remove(internal_id);
         let minimized = minimized == Minimized::Yes;
         self.calls
             .lock()
@@ -228,6 +231,7 @@ impl WindowManager for MockKWin {
     }
 
     async fn set_window_modes(&self, internal_id: &str, modes: WindowModes) -> Result<()> {
+        self.pinned.lock().await.remove(internal_id);
         self.calls.lock().await.push(format!(
             "modes:{internal_id}:vertical={}:horizontal={}:full_screen={}",
             modes.maximized_vertically, modes.maximized_horizontally, modes.full_screen
@@ -236,6 +240,7 @@ impl WindowManager for MockKWin {
     }
 
     async fn leave_window_modes(&self, internal_id: &str, timeout: Duration) -> Result<ModesLeft> {
+        self.pinned.lock().await.remove(internal_id);
         self.calls
             .lock()
             .await
@@ -270,6 +275,7 @@ impl WindowManager for MockKWin {
     }
 
     async fn send_window_to_screen(&self, internal_id: &str, screen: &str) -> Result<()> {
+        self.pinned.lock().await.remove(internal_id);
         self.calls
             .lock()
             .await
@@ -905,6 +911,33 @@ async fn toggle_on_pins_the_window_where_it_was_placed_until_hidden() {
     service.toggle_app("dolphin").await.unwrap();
 
     assert!(kwin.pinned.lock().await.is_empty());
+}
+
+#[tokio::test]
+async fn shutdown_releases_the_parked_window_before_restoring_it() {
+    let mut managed = managed_app(app("dolphin", "super+f9", "dolphin"), "{abc}");
+    managed.restore = RestoreState {
+        placement: Some(RestorePlacement {
+            geometry: Some(geometry(10, 20, 300, 400)),
+            modes: WindowModes::default(),
+        }),
+        no_border: None,
+    };
+    let registry = Arc::new(Mutex::new(AppRegistry::new(vec![managed])));
+    registry.lock().await.mark_visible("dolphin");
+    let kwin = mock_kwin(Some(window(
+        "{abc}",
+        "dolphin",
+        "Dolphin",
+        geometry(10, 20, 300, 400),
+    )));
+    let service = ToggleService::new(registry, Arc::<MockKWin>::clone(&kwin), vec![screen()]);
+
+    service.toggle_app("dolphin").await.unwrap();
+    assert!(kwin.parked.lock().await.contains_key("{abc}"));
+    service.restore_tracked_windows_on_shutdown().await;
+
+    assert!(kwin.parked.lock().await.is_empty());
 }
 
 #[tokio::test]
