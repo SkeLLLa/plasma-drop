@@ -42,7 +42,7 @@ A hotkey is zero or more modifiers and one key, joined with `+`, such as `super+
 
 A hotkey can also be `super` or `alt` on its own, which fires when you tap that key without
 pressing anything else in between. Combinations with that key keep working, both other apps'
-and plasma-drop's, such as `super+f9`. This needs Plasma 6.1 or later.
+and plasma-drop's, such as `super+f9`.
 
 A modifier tap fires when the key is released, and only when no other key, mouse button or
 scroll came between press and release. There is no time limit, so holding the key and letting

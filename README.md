@@ -42,7 +42,8 @@ Swift port of `plasma-drop` and reads the same config file.
 
 ## Install
 
-You need KDE Plasma 6 on Wayland, with a session D-Bus and KWin scripting. `plasma-drop` doesn't
+You need KDE Plasma 6.3 or later on Wayland, with a session D-Bus and KWin scripting. Older
+releases don't let scripts read whether a window is maximized. `plasma-drop` doesn't
 support X11 or other compositors. Packages and tarballs exist for x86_64 and aarch64.
 
 | Distribution | How to install |
