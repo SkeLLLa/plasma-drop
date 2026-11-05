@@ -4,7 +4,7 @@
   <img src="../resources/icons/plasma-drop-icon.svg" alt="plasma-drop icon" width="96" height="96">
 </p>
 
-`plasma-drop` is a KDE Plasma 6 dropdown app launcher for Wayland sessions driven by `KWin` scripting and global shortcuts.
+`plasma-drop` is a KDE Plasma 6.3+ dropdown app launcher for Wayland sessions driven by `KWin` scripting and global shortcuts.
 
 ## What It Does
 

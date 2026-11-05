@@ -3,7 +3,7 @@
 ## Requirements
 
 - Linux desktop session
-- KDE Plasma 6 on Wayland
+- KDE Plasma 6.3 or later on Wayland (older releases don't let scripts read whether a window is maximized)
 - Session D-Bus
 - `KWin` scripting support
 
