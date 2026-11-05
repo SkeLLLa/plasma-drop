@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.17.6](https://github.com/SkeLLLa/plasma-drop/compare/v1.17.5...v1.17.6) - 2026-11-05
+
+### Fixed
+
+- re-apply holds after outputs change and retarget parks to new screens
+- let user tiling win over the pin and release holds before shutdown restore
+- keep shown window docked when KWin re-places it #36
+
 ## [1.17.5](https://github.com/SkeLLLa/plasma-drop/compare/v1.17.4...v1.17.5) - 2026-11-04
 
 ### Fixed
