@@ -17,6 +17,7 @@ impl PlasmaDropDbusObject {
         match level {
             "ERR" => error!(target: "kwin_script", "{msg}"),
             "WRN" => warn!(target: "kwin_script", "{msg}"),
+            "DBG" => debug!(target: "kwin_script", "{msg}"),
             _ => info!(target: "kwin_script", "{msg}"),
         }
     }

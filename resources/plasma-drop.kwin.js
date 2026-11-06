@@ -10,6 +10,7 @@ log.log = (level, msg) => {
 };
 log.error = (msg) => log.log("ERR", msg);
 log.info = (msg) => log.log("INF", msg);
+log.debug = (msg) => log.log("DBG", msg);
 log.warning = (msg) => log.log("WRN", msg);
 
 const mapWindow = (window) => ({
@@ -378,12 +379,15 @@ cmds["MOVE_WINDOW_TO_CURRENT_DESKTOP"] = (params) => {
 // offscreen window back onto a screen whenever the app acknowledges a configure, e.g. after
 // the window loses focus or the work area changes, and re-places a shown one when its
 // output is reconfigured, e.g. while the screen dims. A held window is moved back.
-// More restores than this within a second means a burst of moves, e.g. KWin re-checking
-// window positions on every step of a screen dimming animation. The guard then stops
-// fighting each move and restores once the moves have stopped for HOLD_SETTLE_MS.
+// More restores than this within a second means a burst of moves. A parked window is still
+// moved back on every one, without logging each: KWin keeps a part of every window on a
+// screen whenever its app acknowledges a configure, and an output sends one on each frame
+// of a brightness or dimming animation. Restoring within the move keeps it from ever being
+// painted. A pinned window instead stops fighting each move and is restored once the moves
+// have stopped for HOLD_SETTLE_MS.
 const HOLD_MAX_RESTORES_PER_SECOND = 10;
 const HOLD_SETTLE_MS = 300;
-// KWin exposes QTimer to scripts; without it the guard gives up on a burst instead.
+// KWin exposes QTimer to scripts; without it a pin gives up on a burst instead.
 const canDefer = typeof QTimer === "function";
 const isParked = (window) => {
     const held = heldWindows[window.internalId.toString()];
@@ -473,8 +477,20 @@ if (canDefer) {
     outputTimer.interval = OUTPUT_SETTLE_MS;
     outputTimer.timeout.connect(reconcileHolds);
 }
+const describeScreens = () =>
+    Array.from(workspace.screens || [], (output) => {
+        const g = output.geometry;
+        return (
+            `${output.name} ${Math.round(g.width)}x${Math.round(g.height)}` +
+            `+${Math.round(g.x)}+${Math.round(g.y)}`
+        );
+    }).join(", ") || "none";
 const onOutputsChanged = () => {
     outputEpoch++;
+    const held = Object.keys(heldWindows).length;
+    if (held > 0) {
+        log.debug(`outputs changed to ${describeScreens()}; re-checking ${held} held window(s)`);
+    }
     if (outputTimer) {
         outputTimer.start();
     } else {
@@ -500,6 +516,7 @@ const holdWindow = (window, target, hold) => {
     let reconcileDue = false;
     let burstStart = 0;
     let burstRestores = 0;
+    let burstMoves = 0;
     let deferTimer = null;
     const bounds = hold.parked ? screensBounds() : null;
     const side = bounds
@@ -582,11 +599,28 @@ const holdWindow = (window, target, hold) => {
     const resetBurst = () => {
         burstStart = Date.now();
         burstRestores = 0;
+        // A burst counts its moves until it settles, across the per-second windows.
+        if (!deferTimer || !deferTimer.active) {
+            burstMoves = 0;
+        }
+    };
+    // One line per burst, as only the first moves of each second are logged.
+    const reportBurst = () => {
+        if (burstMoves > HOLD_MAX_RESTORES_PER_SECOND) {
+            const g = window.frameGeometry;
+            log.debug(
+                `KWin moved ${hold.what} ${describeWindow(window)} ${burstMoves} times in a ` +
+                    `burst; it is at ${Math.round(g.x)},${Math.round(g.y)}, held at ` +
+                    `${target.x},${target.y}`
+            );
+        }
+        burstMoves = 0;
     };
     const runDeferred = () => {
         if (stopped || window.deleted) {
             return;
         }
+        reportBurst();
         resetBurst();
         if (outputEpoch !== reconciledEpoch || reconcileDue) {
             reconcile();
@@ -620,6 +654,20 @@ const holdWindow = (window, target, hold) => {
         deferTimer.timeout.connect(runDeferred);
     }
     const onBurst = () => {
+        if (hold.parked) {
+            if (burstRestores === HOLD_MAX_RESTORES_PER_SECOND + 1) {
+                log.debug(
+                    `${hold.what} ${describeWindow(window)} keeps moving; ` +
+                        `moving it ${hold.where} each time`
+                );
+            }
+            restore();
+            // Only reports the burst once it settles.
+            if (deferTimer) {
+                deferTimer.start();
+            }
+            return;
+        }
         if (!deferTimer) {
             log.error(`${hold.what} ${describeWindow(window)} keeps moving; no longer holding it`);
             release(id);
@@ -652,6 +700,7 @@ const holdWindow = (window, target, hold) => {
         if (now - burstStart > 1000) {
             resetBurst();
         }
+        burstMoves++;
         if (++burstRestores > HOLD_MAX_RESTORES_PER_SECOND) {
             onBurst();
             return;
