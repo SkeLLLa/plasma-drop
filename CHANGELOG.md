@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.17.7](https://github.com/SkeLLLa/plasma-drop/compare/v1.17.6...v1.17.7) - 2026-11-06
+
+### Fixed
+
+- flickering issue try 3
+
 ## [1.17.6](https://github.com/SkeLLLa/plasma-drop/compare/v1.17.5...v1.17.6) - 2026-11-05
 
 ### Fixed
