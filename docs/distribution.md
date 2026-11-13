@@ -54,8 +54,10 @@ Release CI publishes signed package repositories ([Linux signing](#linux-signing
 - `https://skellla.github.io/plasma-drop/rpm/x86_64` and `.../rpm/aarch64`
 - `https://skellla.github.io/plasma-drop/deb`
 
-The RPM repository is generated with `createrepo_c --compatibility`. The APT repository uses a
-`stable` suite and `main` component generated from the published `.deb` packages. GitHub Releases
+[ziptie-soft/pkg-pages](https://github.com/ziptie-soft/pkg-pages)'s reusable workflow builds them
+(the `packages` job): the RPM repository with `createrepo_c --compatibility`, and the APT
+repository with a `stable` suite and `main` component from the published `.deb` packages. Its
+landing page also shows the packslip and mise install commands. GitHub Releases
 remain the long-term artifact archive; Pages keeps the 10 most recent releases. Every directory of
 the site has an `index.html` listing, since Pages serves none of its own.
 
@@ -104,14 +106,17 @@ The release flow:
 7. It builds `deb` via `cargo-deb`.
 8. It builds `rpm` via `cargo-generate-rpm`.
 9. It verifies package contents and architectures before upload. The tarball, `.deb` and `.rpm`
-   of each architecture are separate artifacts (`release-linux-{tar,deb,rpm}-<arch>`).
+   of each architecture are separate artifacts (`release-linux-{tar,deb}-<arch>` and
+   `unsigned-linux-rpm-<arch>`).
 10. `crate-package` runs `cargo package --locked`, which also builds the packaged source, and
     keeps `plasma-drop-<version>.crate` with the Rust version it used. If an earlier attempt of
     the same run already published the version, it keeps crates.io's file instead, after
     checking crates.io records this run.
-11. `sign-linux` signs both `rpm` files with the Linux signing subkey, and `verify-linux` checks
-    them against `packaging/signing/repo.asc` and installs the packages in Fedora 44, Debian
-    trixie and Ubuntu 26.04 (`x86_64`), and Fedora 44 and Debian trixie (`aarch64`).
+11. `packages` calls pkg-pages' `publish.yml` (pinned by commit SHA): it signs both `rpm` files
+    with the Linux signing subkey, checks them against `packaging/signing/repo.asc`, installs the
+    packages in Fedora 44, Debian trixie and Ubuntu 26.04 (`x86_64`), and Fedora 44 and Debian
+    trixie (`aarch64`) and smoke-tests them, then builds the signed RPM/APT repositories from them
+    and the nine releases before, without deploying them.
 12. `checksums` generates a combined `SHA256SUMS` file, one `.sha256` sidecar per artifact, and
     build provenance attestations for the 6 Linux files and the crate, kept as
     `plasma-drop-<version>.intoto.jsonl`.
@@ -123,20 +128,19 @@ The release flow:
     provenance bundle, all before anything is uploaded.
 15. `upload-draft` uploads all 17 files to the draft release, downloads them again and compares
     them byte for byte with what was built.
-16. `repo` builds the RPM/APT repositories and signs their metadata, without deploying them.
-17. `publish-crate` re-packages the crate with the same Rust version and checks it is
+16. `publish-crate` re-packages the crate with the same Rust version and checks it is
     byte-identical to the attested file, then runs `cargo publish --no-verify` (no build runs
     while the crates.io token exists) and checks that crates.io's checksum and
     trusted-publishing record match the attested file, this commit and this run.
-18. `publish` turns the draft into a published release, marking it `latest` only if no higher
+17. `publish` turns the draft into a published release, marking it `latest` only if no higher
     version is published. With release immutability on, its assets and tag are fixed from then on.
-19. `verify-published` checks the public release and crates.io the way users do (every file's
+18. `verify-published` checks the public release and crates.io the way users do (every file's
     provenance, packslip, the crate, and for immutable releases `gh release verify`), then
-    writes the provenance badge. `pages` adds it to the site `repo` built and deploys them,
+    writes the provenance badge. `pages` adds it to the site `packages` built and deploys them,
     unless a newer release is already published.
 
-Nothing is publicly visible (crate, published release, `latest`, Pages) until `verify-linux`,
-`verify-signatures`, `upload-draft`'s byte comparison and `repo`'s site checks have all passed.
+Nothing is publicly visible (crate, published release, `latest`, Pages) until `packages`' install
+tests and site build, `verify-signatures` and `upload-draft`'s byte comparison have all passed.
 The order is `publish-crate`, `publish`, `verify-published`, then `pages`. `publish` is the only
 job with `contents: write` after `upload-draft`, and compares the draft with the verified files
 once more right before publishing it.
@@ -222,31 +226,33 @@ are off by default), so the signed `InRelease` is what covers them. A .deb downl
 release page is covered by the checksums and attestations instead.
 
 **Pin.** `packaging/signing/repo.asc` holds the public key (the primary, its subkeys and their
-revocations), armored, and only it. While it is absent, `sign-linux` passes the packages through
-unsigned and `repo` builds unsigned repositories, with a notice. Once it is committed,
-`.ci/linux-signing.sh import` fails the release when the `REPO_SIGNING_KEY` secret is
+revocations), armored, and only it. While it is absent, `packages` passes the packages through
+unsigned and builds unsigned repositories, with a notice. Once it is committed, pkg-pages fails
+the release when the `REPO_SIGNING_KEY` secret is
 missing, belongs to another primary key, or can't sign (passphrase, expiry, or a subkey the pin
-revokes); setting the secret without committing the pin fails too. `import` also merges the pin
-into CI's keyring, so the published `plasma-drop.asc` is the committed certificate.
-`verify-linux` checks each .rpm against the pin before installing it, and `repo` checks every .rpm
-it publishes.
+revokes); setting the secret without committing the pin fails too. It also merges the pin into
+CI's keyring, so the published `plasma-drop.asc` is the committed certificate. Its install tests
+check each .rpm against the pin before installing it, and its site build checks every .rpm it
+publishes.
 
-**Where it signs.** `sign-linux` runs after `linux-assets`, in the Fedora 44 container with
-`rpm-sign`, and replaces each `release-linux-rpm-<arch>` artifact with the signed file, so
-`verify-linux`, `checksums` and the release page see only that. No build runs in a job that holds
-the key. `repo` (in the Debian trixie container: the runner's rpm 4.18 can't read a pin with a
-revoked subkey) signs the metadata and also signs the .rpm files of the earlier releases it
+**Where it signs.** `packages`' sign job runs after `linux-assets` (rpm-sign in pkg-pages' pinned
+Fedora 44 image) and uploads the signed files as one artifact (`pkg-pages-rpm`), which
+`checksums` and the later jobs use instead of the build's `unsigned-linux-rpm-<arch>`, so the
+checksums and the release page see only the signed files. No build runs in a job that holds the
+key. Its repo job (in pkg-pages' Debian trixie image: the runner's rpm 4.18 can't read a pin with
+a revoked subkey) signs the metadata and also signs the .rpm files of the earlier releases it
 republishes. The release's own is already signed and stays byte-identical, while those from
 before the key, or signed by a since-revoked subkey, differ from their release page copies (and
-checksums) by the signature. `pages` only adds the provenance badge to the site and deploys it, so the key and the Pages deploy token
-never share a job.
+checksums) by the signature. `pages` only adds the provenance badge to the site and deploys it,
+so the key and the Pages deploy token never share a job.
 
-**Secret.** The subkey lives only in the `linux-signing` GitHub environment, used by
-`sign-linux` and `repo`:
+**Secret.** The subkey lives only in the `linux-signing` GitHub environment, used only by
+`packages`' sign and repo jobs (the reusable workflow sets `environment: linux-signing`, and
+`release.yml` maps the secret to it):
 
 | Secret             | Value                                                                         |
 | ------------------ | ----------------------------------------------------------------------------- |
-| `REPO_SIGNING_KEY` | one signing subkey, armored, without a passphrase (`linux-signing.sh ci-key`) |
+| `REPO_SIGNING_KEY` | one signing subkey, armored, without a passphrase (`ci-key`, below)           |
 
 Settings → Environments → New environment `linux-signing`, deployment branches: only `master`
 (optionally required reviewers). Don't keep it as a repository secret. Both release workflows run
@@ -254,35 +260,39 @@ on `master`; never add tag patterns.
 
 **Making the key.** On the maintainer's machine, not in CI, in a keyring kept for it (`gpg`
 asks for the passphrase). RSA 4096 is what every supported rpm, dnf and apt (sqv) accepts. The
-primary can only certify; the subkey can only sign:
+primary can only certify; the subkey can only sign. `<DIR>` is a private directory used only for
+this key (for example `~/.local/share/package-signing/gnupg`), `<FPR>` the primary's fingerprint
+and `<SUB>` the subkey's. `ci-key` is pkg-pages'
+[`tools/ci-key`](https://github.com/ziptie-soft/pkg-pages/blob/v1.1.1/tools/ci-key) (see its
+[signing guide](https://github.com/ziptie-soft/pkg-pages/blob/v1.1.1/docs/signing.md)). The
+commands work in fish and bash:
 
 ```sh
-export GNUPGHOME=~/.local/share/package-signing/gnupg   # any private directory
-install -d -m 700 "$GNUPGHOME"
-gpg --quick-gen-key 'plasma-drop packages <you@example.com>' rsa4096 cert never
-FPR=<the primary's fingerprint, from gpg -K>
-gpg --quick-add-key "$FPR" rsa4096 sign 3y
-SUB=<the new subkey's fingerprint, from gpg -K --with-subkey-fingerprints>
-gpg --armor --export "$FPR" > packaging/signing/repo.asc
-.ci/linux-signing.sh ci-key "$SUB" | gh secret set REPO_SIGNING_KEY --env linux-signing
+install -d -m 700 <DIR>
+gpg --homedir <DIR> --quick-gen-key 'plasma-drop packages <you@example.com>' rsa4096 cert never
+gpg --homedir <DIR> -K
+gpg --homedir <DIR> --quick-add-key <FPR> rsa4096 sign 3y
+gpg --homedir <DIR> -K --with-subkey-fingerprints
+gpg --homedir <DIR> --armor --export <FPR> > packaging/signing/repo.asc
+ci-key --homedir <DIR> <SUB> | gh secret set REPO_SIGNING_KEY --env linux-signing
 ```
 
-`ci-key` exports that one subkey with the primary's secret left out and the passphrase removed.
+`ci-key` asks for the passphrase and exports that one subkey with the primary's secret left out and the passphrase removed.
 Keep offline, apart from each other: the keyring (the primary's secret is passphrase-protected)
-and the revocation certificate gpg wrote to `$GNUPGHOME/openpgp-revocs.d/<fingerprint>.rev`,
+and the revocation certificate gpg wrote to `<DIR>/openpgp-revocs.d/<FPR>.rev`,
 which revokes the whole key even if the keyring is lost. Commit `repo.asc` in the same change
 that updates the README's install commands to the signed ones (the index page shows them); the
 next release is the first signed one.
 
 **Rotating or revoking the subkey.** Users trust the primary, so a subkey change needs no action
 from them beyond the `plasma-drop.asc` they fetch. Before the subkey expires, or if the secret
-leaks: with the offline keyring, revoke the old subkey if it leaked (`gpg --edit-key "$FPR"`,
-`key N`, `revkey`, `save`), add a new one with `--quick-add-key`, export `repo.asc` again and set
-the secret from `ci-key` for the new one. Commit `repo.asc`: until then, `import` refuses a
+leaks: with the offline keyring, revoke the old subkey if it leaked
+(`gpg --homedir <DIR> --edit-key <FPR>`, `key N`, `revkey`, `save`), add a new one with `--quick-add-key`, export `repo.asc` again and set
+the secret from `ci-key` for the new one. Commit `repo.asc`: until then, pkg-pages refuses a
 subkey the pin doesn't know, and once a revocation is committed it refuses the revoked one. Users
 then get the revocation with the next `plasma-drop.asc` they fetch; dnf refuses packages signed
-by the revoked subkey, and `repo` re-signs the earlier releases' with the new one. If the primary
-itself leaks, import the revocation certificate (remove the `:` before `-----BEGIN` first),
+by the revoked subkey, and the next site build re-signs the earlier releases' with the new one.
+If the primary itself leaks, import the revocation certificate (remove the `:` before `-----BEGIN` first),
 commit the revoked `repo.asc` (every release fails from then on), and start over with a new key;
 users have to fetch it again.
 
