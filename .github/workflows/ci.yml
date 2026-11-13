@@ -43,7 +43,7 @@ jobs:
           persist-credentials: false
       # mise 2026.10.14, pinned by checksum. mise.lock pins the tools (the action adds --locked).
       - name: Install bats (version from .mise.toml)
-        uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
+        uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
         with:
           version: 2026.10.14
           sha256: 50be7185bcf75929f01cc5630276bcb43ca367f7c5b176e2580903d28c611dc4
@@ -68,7 +68,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Run zizmor
-        uses: zizmorcore/zizmor-action@53290badfa369cb0bf7ad16342cb62c2fa47ac7b # v0.8.0
+        uses: zizmorcore/zizmor-action@45d7276c9ca790aabd705e31ca99c6185c3e76dd # v0.8.1
         with:
           advanced-security: false
 
@@ -84,7 +84,7 @@ jobs:
           persist-credentials: false
       # mise 2026.10.14, pinned by checksum. mise.lock pins the tools (the action adds --locked).
       - name: Install jactionlint, shellcheck, bats (versions from .mise.toml)
-        uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
+        uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
         with:
           version: 2026.10.14
           sha256: 50be7185bcf75929f01cc5630276bcb43ca367f7c5b176e2580903d28c611dc4
@@ -121,7 +121,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/master' }}
       # mise 2026.10.14, pinned by checksum. mise.lock pins the tools (the action adds --locked).
       - name: Install cccc (version from .mise.toml)
-        uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
+        uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
         with:
           version: 2026.10.14
           sha256: 50be7185bcf75929f01cc5630276bcb43ca367f7c5b176e2580903d28c611dc4
@@ -147,7 +147,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Run fallow (version from .mise.toml)
-        uses: fallow-rs/fallow@3d63c430df08c1fbc1c97085db63b3d622ef82a0 # v3.38.0
+        uses: fallow-rs/fallow@90833be1e8d12202e6f6084c417585e3b78005ce # v3.40.0
         with:
           version: 3.37.0
           config: fallow.toml
@@ -231,7 +231,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Install cargo-deny
-        uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2.88.1
+        uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
         with:
           tool: cargo-deny@0.20.2
       - name: Check licenses, bans, sources and advisories
