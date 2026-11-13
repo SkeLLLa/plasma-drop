@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.18.0](https://github.com/SkeLLLa/plasma-drop/compare/v1.17.9...v1.18.0) - 2026-11-13
+
+### Added
+
+- *(release)* publish static musl tarballs and a prebuilt Nix flake with pkg-pages
+
 ## [1.17.9](https://github.com/SkeLLLa/plasma-drop/compare/v1.17.8...v1.17.9) - 2026-11-13
 
 ### Fixed
