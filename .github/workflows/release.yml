@@ -382,6 +382,73 @@ jobs:
           if-no-files-found: error
           path: target/generate-rpm/${{ env.RPM }}
 
+  # Static builds of the same tarball, for systems without a compatible glibc and for the
+  # prebuilt Nix flake on the Pages site (`packages`). plasma-drop has no C dependencies, so the
+  # Rust musl target builds it without musl-tools.
+  linux-musl-assets:
+    name: Linux musl assets (${{ matrix.arch }}-unknown-linux-musl)
+    needs: release
+    if: ${{ needs.release.outputs.released == 'true' }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64, runner: ubuntu-24.04 }
+          - { arch: aarch64, runner: ubuntu-24.04-arm }
+    env:
+      TARGET: ${{ matrix.arch }}-unknown-linux-musl
+      VERSION: ${{ needs.release.outputs.version }}
+    steps:
+      - name: Checkout the release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
+          targets: ${{ env.TARGET }}
+
+      - name: Build release binary
+        run: cargo build --release --locked --target "${TARGET}"
+
+      # The same layout as the gnu tarball, so install-user.sh works with either.
+      - name: Assemble binary distribution
+        run: |
+          set -euo pipefail
+          DIST_ROOT="target/dist/plasma-drop-${VERSION}-${TARGET}"
+          mkdir -p "${DIST_ROOT}/bin" "${DIST_ROOT}/share/systemd/user" "${DIST_ROOT}/share/plasma-drop/examples" "${DIST_ROOT}/resources/icons"
+          install -m 755 "target/${TARGET}/release/plasma-drop" "${DIST_ROOT}/bin/plasma-drop"
+          install -m 755 packaging/dist/install-user.sh "${DIST_ROOT}/install-user.sh"
+          install -m 644 packaging/systemd/plasma-drop.packaged.service "${DIST_ROOT}/share/systemd/user/plasma-drop.service"
+          install -m 644 resources/example-config.toml "${DIST_ROOT}/share/plasma-drop/examples/config.toml"
+          install -m 644 resources/icons/plasma-drop-icon.svg "${DIST_ROOT}/resources/icons/plasma-drop-icon.svg"
+          install -m 644 resources/icons/plasma-drop-icon.png "${DIST_ROOT}/resources/icons/plasma-drop-icon.png"
+          install -m 644 README.md COPYING "${DIST_ROOT}/"
+          tar -C target/dist -czf "target/dist/plasma-drop-${VERSION}-${TARGET}.tar.gz" "plasma-drop-${VERSION}-${TARGET}"
+
+      # The point of this target: no dynamic loader, no shared libraries.
+      - name: Verify the static binary
+        run: |
+          set -euo pipefail
+          bin="target/dist/plasma-drop-${VERSION}-${TARGET}/bin/plasma-drop"
+          file "${bin}" | grep -Eq 'static(-pie)? linked'
+          "${bin}" --version
+          "${bin}" print-example-config > /dev/null
+
+      - name: Keep the tarball
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-linux-musl-${{ matrix.arch }}
+          retention-days: 7
+          if-no-files-found: error
+          path: target/dist/plasma-drop-${{ env.VERSION }}-${{ env.TARGET }}.tar.gz
+
   # The .crate that crates.io will serve, packaged at github.sha. `cargo package` also builds the
   # packaged source, as `cargo publish` would. checksums attests it with the other assets and
   # publish-crate publishes exactly these bytes, with the Rust version recorded here (cargo
@@ -452,7 +519,7 @@ jobs:
   # See https://github.com/ziptie-soft/pkg-pages/blob/master/docs/actions.md#publish-reusable-workflow
   packages:
     name: Linux packages and repositories
-    needs: [release, linux-assets]
+    needs: [release, linux-assets, linux-musl-assets]
     if: ${{ needs.release.outputs.released == 'true' }}
     permissions:
       contents: read
@@ -466,6 +533,13 @@ jobs:
       rpm-artifacts: unsigned-linux-rpm-*
       name: plasma-drop
       description: KDE Plasma 6 dropdown app launcher
+      # A hash-pinned Nix flake on the site (<base-url>/nix/flake.tar.gz) that installs the static
+      # musl tarballs of this release; the release is public before `pages` deploys.
+      nix-artifacts: release-linux-musl-*
+      nix-archives: |
+        x86_64-linux=plasma-drop-${{ needs.release.outputs.version }}-x86_64-unknown-linux-musl.tar.gz
+        aarch64-linux=plasma-drop-${{ needs.release.outputs.version }}-aarch64-unknown-linux-musl.tar.gz
+      nix-binaries: bin/plasma-drop
       # The landing page's packslip and mise card; upload-draft attaches the bundle.
       packslip: true
       packslip-pin: ps1_4yd5vxao3lfzaox72lynxuotke
@@ -509,7 +583,8 @@ jobs:
         with:
           persist-credentials: false
 
-      # The tarballs, the .deb files and the crate; the .rpm files are packages' signed ones.
+      # The gnu and musl tarballs, the .deb files and the crate; the .rpm files are packages'
+      # signed ones.
       - name: Fetch the assets
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -550,7 +625,7 @@ jobs:
             release-assets/*.rpm
             release-assets/*.crate
 
-      # One Sigstore bundle covering all 7 files, attached to the release so the provenance can
+      # One Sigstore bundle covering all 9 files, attached to the release so the provenance can
       # be checked without GitHub's attestation API (`gh attestation verify --bundle`).
       # `.intoto.jsonl` is the name Scorecard's releasesHaveProvenance looks for.
       - name: Keep the provenance bundle
@@ -687,7 +762,7 @@ jobs:
               --source-ref refs/heads/master --source-digest "${GITHUB_SHA}"
           done
 
-  # Attaches the 17 files to the draft, then downloads the draft again and compares it byte for
+  # Attaches the 21 files to the draft, then downloads the draft again and compares it byte for
   # byte with what verify-signatures checked. Uploads only ever go to a draft, so a re-run can
   # replace them; a published (immutable) release is only checked. Runs no third-party code.
   upload-draft:

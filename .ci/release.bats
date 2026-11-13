@@ -43,22 +43,24 @@ newer() {
     [ "${output}" = "1.15.0" ]
 }
 
-@test "assets: the 7 built files" {
+@test "assets: the 9 built files" {
     run "${script}" assets 1.15.0
     [ "${status}" -eq 0 ]
-    [ "${#lines[@]}" -eq 7 ]
+    [ "${#lines[@]}" -eq 9 ]
     [ "${lines[0]}" = "plasma-drop-1.15.0-x86_64-unknown-linux-gnu.tar.gz" ]
-    [ "${lines[3]}" = "plasma-drop_1.15.0_arm64.deb" ]
-    [ "${lines[5]}" = "plasma-drop-1.15.0-1.aarch64.rpm" ]
-    [ "${lines[6]}" = "plasma-drop-1.15.0.crate" ]
+    [ "${lines[2]}" = "plasma-drop-1.15.0-x86_64-unknown-linux-musl.tar.gz" ]
+    [ "${lines[3]}" = "plasma-drop-1.15.0-aarch64-unknown-linux-musl.tar.gz" ]
+    [ "${lines[5]}" = "plasma-drop_1.15.0_arm64.deb" ]
+    [ "${lines[7]}" = "plasma-drop-1.15.0-1.aarch64.rpm" ]
+    [ "${lines[8]}" = "plasma-drop-1.15.0.crate" ]
 }
 
-@test "release-files: 17 unique files with sidecars, sums, packslip and provenance" {
+@test "release-files: 21 unique files with sidecars, sums, packslip and provenance" {
     run "${script}" release-files 1.15.0
     [ "${status}" -eq 0 ]
-    [ "${#lines[@]}" -eq 17 ]
-    [ "$(printf '%s\n' "${lines[@]}" | sort -u | wc -l)" -eq 17 ]
-    [ "$(printf '%s\n' "${lines[@]}" | grep -c '\.sha256$')" -eq 7 ]
+    [ "${#lines[@]}" -eq 21 ]
+    [ "$(printf '%s\n' "${lines[@]}" | sort -u | wc -l)" -eq 21 ]
+    [ "$(printf '%s\n' "${lines[@]}" | grep -c '\.sha256$')" -eq 9 ]
     printf '%s\n' "${lines[@]}" | grep -qxF SHA256SUMS
     printf '%s\n' "${lines[@]}" | grep -qxF packslip.sigstore.json
     printf '%s\n' "${lines[@]}" | grep -qxF plasma-drop-1.15.0.intoto.jsonl
@@ -352,7 +354,7 @@ pub='{"provider":"github","repository":"SkeLLLa/plasma-drop","run_id":"42","sha"
 
 # --- check-release ------------------------------------------------------------------------
 
-# src: the 17 files a run verified. gh "downloads" the release from rel, a copy of them.
+# src: the 21 files a run verified. gh "downloads" the release from rel, a copy of them.
 release_fixture() {
     src="${BATS_TEST_TMPDIR}/src"
     rel="${BATS_TEST_TMPDIR}/rel"
