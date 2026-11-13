@@ -432,12 +432,21 @@ jobs:
           install -m 644 README.md COPYING "${DIST_ROOT}/"
           tar -C target/dist -czf "target/dist/plasma-drop-${VERSION}-${TARGET}.tar.gz" "plasma-drop-${VERSION}-${TARGET}"
 
-      # The point of this target: no dynamic loader, no shared libraries.
+      # The point of this target: no dynamic loader, no shared libraries. Checked on the ELF
+      # headers, not `file`'s wording: x86_64 builds are static-pie, aarch64 plain static.
       - name: Verify the static binary
         run: |
           set -euo pipefail
           bin="target/dist/plasma-drop-${VERSION}-${TARGET}/bin/plasma-drop"
-          file "${bin}" | grep -Eq 'static(-pie)? linked'
+          file "${bin}"
+          if readelf -lW "${bin}" | grep -q 'program interpreter'; then
+            echo "::error::${bin} requests a dynamic loader"
+            exit 1
+          fi
+          if readelf -dW "${bin}" | grep -q NEEDED; then
+            echo "::error::${bin} needs shared libraries"
+            exit 1
+          fi
           "${bin}" --version
           "${bin}" print-example-config > /dev/null
 
