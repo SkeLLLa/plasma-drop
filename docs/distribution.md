@@ -17,7 +17,9 @@ embedded so `cargo install` users can print them from the binary.
 ### Binary archive
 
 The release archive (`x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu`) is intended for
-user-local installation and contains:
+user-local installation. Each architecture also has a static build with the same layout
+(`x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`), which needs no particular glibc and
+backs the prebuilt [Nix flake](#nix-flake). Each archive contains:
 
 - `bin/plasma-drop`
 - `share/systemd/user/plasma-drop.service`
@@ -57,9 +59,25 @@ Release CI publishes signed package repositories ([Linux signing](#linux-signing
 [ziptie-soft/pkg-pages](https://github.com/ziptie-soft/pkg-pages)'s reusable workflow builds them
 (the `packages` job): the RPM repository with `createrepo_c --compatibility`, and the APT
 repository with a `stable` suite and `main` component from the published `.deb` packages. Its
-landing page also shows the packslip and mise install commands. GitHub Releases
+landing page also shows the packslip and mise install commands, and the site carries a prebuilt
+[Nix flake](#nix-flake). GitHub Releases
 remain the long-term artifact archive; Pages keeps the 10 most recent releases. Every directory of
 the site has an `index.html` listing, since Pages serves none of its own.
+
+### Nix flake
+
+Linux users can install the prebuilt static binary without building anything:
+
+```sh
+nix profile install https://skellla.github.io/plasma-drop/nix/flake.tar.gz
+```
+
+`packages` publishes that flake on the Pages site (pkg-pages' `nix-*` inputs). It names the
+release's `x86_64` and `aarch64` musl tarballs by URL and SHA-256 and installs `plasma-drop`
+only; the binary embeds the KWin script, the example config and the user unit, so
+`plasma-drop init --systemd` writes them (set the unit's `ExecStart` to
+`%h/.nix-profile/bin/plasma-drop`). The flake itself is not signed: it is trusted through HTTPS
+and the hashes it pins.
 
 ### `cargo install`
 
@@ -107,7 +125,9 @@ The release flow:
 8. It builds `rpm` via `cargo-generate-rpm`.
 9. It verifies package contents and architectures before upload. The tarball, `.deb` and `.rpm`
    of each architecture are separate artifacts (`release-linux-{tar,deb}-<arch>` and
-   `unsigned-linux-rpm-<arch>`).
+   `unsigned-linux-rpm-<arch>`). Alongside it, `linux-musl-assets` builds the static
+   `<arch>-unknown-linux-musl` tarball with the same layout, checks the binary is static and
+   smoke-tests it (`release-linux-musl-<arch>`).
 10. `crate-package` runs `cargo package --locked`, which also builds the packaged source, and
     keeps `plasma-drop-<version>.crate` with the Rust version it used. If an earlier attempt of
     the same run already published the version, it keeps crates.io's file instead, after
@@ -116,17 +136,18 @@ The release flow:
     with the Linux signing subkey, checks them against `packaging/signing/repo.asc`, installs the
     packages in Fedora 44, Debian trixie and Ubuntu 26.04 (`x86_64`), and Fedora 44 and Debian
     trixie (`aarch64`) and smoke-tests them, then builds the signed RPM/APT repositories from them
-    and the nine releases before, without deploying them.
+    and the nine releases before, plus the prebuilt Nix flake over the musl tarballs, without
+    deploying them.
 12. `checksums` generates a combined `SHA256SUMS` file, one `.sha256` sidecar per artifact, and
-    build provenance attestations for the 6 Linux files and the crate, kept as
+    build provenance attestations for the 8 Linux files and the crate, kept as
     `plasma-drop-<version>.intoto.jsonl`.
-13. `jdx/packslip` signs a `packslip.sigstore.json` manifest covering both local tarballs, one
+13. `jdx/packslip` signs a `packslip.sigstore.json` manifest covering both gnu tarballs, one
     `linux/<arch>` entry each (used by `packslip install` and the `mise` packslip backend),
     recording the tagged commit. The signing job has read-only access.
 14. `verify-signatures` checks the checksums, the packslip manifest against the signer
     fingerprint in `README.md` and the exact signer `release.yml@refs/heads/master`, and the
     provenance bundle, all before anything is uploaded.
-15. `upload-draft` uploads all 17 files to the draft release, downloads them again and compares
+15. `upload-draft` uploads all 21 files to the draft release, downloads them again and compares
     them byte for byte with what was built.
 16. `publish-crate` re-packages the crate with the same Rust version and checks it is
     byte-identical to the attested file, then runs `cargo publish --no-verify` (no build runs

@@ -6,10 +6,10 @@
 #   .ci/release.sh version
 #       print the package version from Cargo.toml
 #   .ci/release.sh assets VERSION
-#       print the 7 files the build produces, one per line: 2 tarballs, 2 .deb, 2 .rpm and
-#       the crate plasma-drop-VERSION.crate
+#       print the 9 files the build produces, one per line: 2 gnu and 2 static musl tarballs,
+#       2 .deb, 2 .rpm and the crate plasma-drop-VERSION.crate
 #   .ci/release.sh release-files VERSION
-#       print the 17 files a release carries: the assets, their .sha256 sidecars, SHA256SUMS,
+#       print the 21 files a release carries: the assets, their .sha256 sidecars, SHA256SUMS,
 #       packslip.sigstore.json and the provenance bundle plasma-drop-VERSION.intoto.jsonl
 #   .ci/release.sh tag-commit TAG
 #       print the commit TAG points to on GitHub (peeled), or an empty line if there is no TAG
@@ -58,6 +58,8 @@ assets() {
     printf '%s\n' \
         "${CRATE}-${v}-x86_64-unknown-linux-gnu.tar.gz" \
         "${CRATE}-${v}-aarch64-unknown-linux-gnu.tar.gz" \
+        "${CRATE}-${v}-x86_64-unknown-linux-musl.tar.gz" \
+        "${CRATE}-${v}-aarch64-unknown-linux-musl.tar.gz" \
         "${CRATE}_${v}_amd64.deb" \
         "${CRATE}_${v}_arm64.deb" \
         "${CRATE}-${v}-1.x86_64.rpm" \

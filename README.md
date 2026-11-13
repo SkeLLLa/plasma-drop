@@ -108,7 +108,7 @@ cd plasma-drop-<version>-<arch>-unknown-linux-gnu
 ./install-user.sh
 ```
 
-### mise, packslip or cargo
+### mise, packslip, Nix or cargo
 
 These put `plasma-drop` on your `PATH`. Pick one:
 
@@ -119,9 +119,16 @@ mise use -g github:SkeLLLa/plasma-drop
 # packslip. Checks the signed release manifest before it installs into ~/.local/bin.
 packslip install github.com/SkeLLLa/plasma-drop --pin ps1_4yd5vxao3lfzaox72lynxuotke
 
+# Nix, prebuilt (x86_64 and aarch64 Linux). Installs the release's static binary, pinned by SHA-256.
+nix profile install https://skellla.github.io/plasma-drop/nix/flake.tar.gz
+
 # cargo. Builds from crates.io.
 cargo install plasma-drop --locked
 ```
+
+`plasma-drop init --systemd` then writes the starter config and the user service. The service
+starts `~/.local/bin/plasma-drop`; for a Nix install, change its `ExecStart` to
+`%h/.nix-profile/bin/plasma-drop`.
 
 The packslip `--pin` fingerprint identifies this repository (not a workflow) and stays the same
 across releases. Check it against this README rather than trusting it on first use. With mise,
