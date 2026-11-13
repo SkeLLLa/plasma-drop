@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.17.9](https://github.com/SkeLLLa/plasma-drop/compare/v1.17.8...v1.17.9) - 2026-11-13
+
+### Fixed
+
+- *(deps)* bump the all-minor-patch group with 2 updates
+- *(deps)* bump rustix to 1.1.6 for RUSTSEC-2026-0486
+
+### Other
+
+- *(release)* sign and publish the Linux packages with ziptie-soft/pkg-pages
+
 ## [1.17.8](https://github.com/SkeLLLa/plasma-drop/compare/v1.17.7...v1.17.8) - 2026-11-06
 
 ### Other
