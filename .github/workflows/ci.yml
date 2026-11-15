@@ -111,7 +111,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Install stable Rust with clippy and rustfmt
-        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
         with:
           toolchain: stable
           components: clippy,rustfmt
@@ -165,7 +165,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Install MSRV toolchain
-        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
         with:
           toolchain: "1.89"
       - name: Cache cargo
@@ -208,7 +208,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Install stable Rust
-        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
         with:
           toolchain: stable
       - name: Cache cargo
