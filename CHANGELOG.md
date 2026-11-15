@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.18.1](https://github.com/SkeLLLa/plasma-drop/compare/v1.18.0...v1.18.1) - 2026-11-15
+
+### Other
+
+- *(release)* upgrade ziptie-soft/pkg-pages to v2.0.0
+
 ## [1.18.0](https://github.com/SkeLLLa/plasma-drop/compare/v1.17.9...v1.18.0) - 2026-11-13
 
 ### Added
