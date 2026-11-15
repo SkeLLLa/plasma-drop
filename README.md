@@ -69,17 +69,20 @@ sudo dnf install plasma-drop
 This is the recommended method: `apt upgrade` then keeps `plasma-drop` up to date.
 
 ```sh
-sudo install -d -m 0755 /etc/apt/keyrings
-sudo curl -fsSLo /etc/apt/keyrings/plasma-drop.asc https://skellla.github.io/plasma-drop/plasma-drop.asc
-echo 'deb [signed-by=/etc/apt/keyrings/plasma-drop.asc] https://skellla.github.io/plasma-drop/deb stable main' | sudo tee /etc/apt/sources.list.d/plasma-drop.list
+sudo curl -fsSLo /usr/share/keyrings/plasma-drop-keyring.asc https://skellla.github.io/plasma-drop/plasma-drop.asc
+sudo curl -fsSLo /etc/apt/sources.list.d/plasma-drop.list https://skellla.github.io/plasma-drop/deb/plasma-drop.list
 sudo apt update
-sudo apt install plasma-drop
+sudo apt install plasma-drop-keyring plasma-drop
 ```
 
 The packages and the repository metadata are signed with the plasma-drop packages key,
 [plasma-drop.asc](https://skellla.github.io/plasma-drop/plasma-drop.asc) (the same as
 [packaging/signing/repo.asc](packaging/signing/repo.asc)); APT and DNF refuse anything it didn't
-sign. DNF asks you to confirm the key's fingerprint on the first install. The repositories keep
+sign. DNF asks you to confirm the key's fingerprint on the first install. The
+`plasma-drop-keyring` package keeps APT's copy of the key current, so key rotations and
+revocations arrive with `apt upgrade`. If you set up the repository before it existed (with the
+key in `/etc/apt/keyrings/`), that setup keeps working; run the commands above once to switch
+over, then delete `/etc/apt/keyrings/plasma-drop.asc`. The repositories keep
 the 10 most recent releases, so you can also pin or downgrade a version
 ([details](docs/distribution.md#linux-signing)).
 
@@ -181,7 +184,7 @@ First stop the service with `systemctl --user disable --now plasma-drop.service`
 | Installed with | Remove with |
 | --- | --- |
 | DNF | `sudo dnf remove plasma-drop`, then `sudo rm /etc/yum.repos.d/plasma-drop.repo` |
-| APT | `sudo apt remove plasma-drop`, then `sudo rm /etc/apt/sources.list.d/plasma-drop.list /etc/apt/keyrings/plasma-drop.asc` |
+| APT | `sudo apt purge plasma-drop plasma-drop-keyring`, then `sudo rm /etc/apt/sources.list.d/plasma-drop.list` |
 | Tarball or packslip | `rm ~/.local/bin/plasma-drop` |
 | mise | `mise unuse -g github:SkeLLLa/plasma-drop` |
 | cargo | `cargo uninstall plasma-drop` |

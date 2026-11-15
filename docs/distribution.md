@@ -60,9 +60,12 @@ Release CI publishes signed package repositories ([Linux signing](#linux-signing
 (the `packages` job): the RPM repository with `createrepo_c --compatibility`, and the APT
 repository with a `stable` suite and `main` component from the published `.deb` packages. Its
 landing page also shows the packslip and mise install commands, and the site carries a prebuilt
-[Nix flake](#nix-flake). GitHub Releases
-remain the long-term artifact archive; Pages keeps the 10 most recent releases. Every directory of
-the site has an `index.html` listing, since Pages serves none of its own.
+[Nix flake](#nix-flake), a `plasma-drop-keyring` .deb that installs the pin as APT's key for the
+repository (so `apt upgrade` delivers key rotations and revocations), and a signed manifest of
+its packages (`pkg-pages.tsv`). GitHub Releases remain the long-term artifact archive; Pages keeps
+the 10 most recent releases, and each release takes the earlier ones from the live site, checked
+against that manifest. Every directory of the site has an `index.html` listing, since Pages serves
+none of its own.
 
 ### Nix flake
 
@@ -132,12 +135,13 @@ The release flow:
     keeps `plasma-drop-<version>.crate` with the Rust version it used. If an earlier attempt of
     the same run already published the version, it keeps crates.io's file instead, after
     checking crates.io records this run.
-11. `packages` calls pkg-pages' `publish.yml` (pinned by commit SHA): it signs both `rpm` files
-    with the Linux signing subkey, checks them against `packaging/signing/repo.asc`, installs the
-    packages in Fedora 44, Debian trixie and Ubuntu 26.04 (`x86_64`), and Fedora 44 and Debian
-    trixie (`aarch64`) and smoke-tests them, then builds the signed RPM/APT repositories from them
-    and the nine releases before, plus the prebuilt Nix flake over the musl tarballs, without
-    deploying them.
+11. `packages` calls pkg-pages' `publish.yml` (pinned by commit SHA): it fetches the nine
+    releases before from the live site, signs both `rpm` files with the Linux signing subkey,
+    checks them against `packaging/signing/repo.asc`, installs the packages in Fedora 44, Debian
+    trixie and Ubuntu 26.04 (`x86_64`), and Fedora 44 and Debian trixie (`aarch64`) and
+    smoke-tests them, then builds the RPM/APT repositories, the keyring package and the prebuilt
+    Nix flake over the musl tarballs, signs the repository metadata and checks the site, without
+    deploying it.
 12. `checksums` generates a combined `SHA256SUMS` file, one `.sha256` sidecar per artifact, and
     build provenance attestations for the 8 Linux files and the crate, kept as
     `plasma-drop-<version>.intoto.jsonl`.
@@ -252,23 +256,23 @@ unsigned and builds unsigned repositories, with a notice. Once it is committed, 
 the release when the `REPO_SIGNING_KEY` secret is
 missing, belongs to another primary key, or can't sign (passphrase, expiry, or a subkey the pin
 revokes); setting the secret without committing the pin fails too. It also merges the pin into
-CI's keyring, so the published `plasma-drop.asc` is the committed certificate. Its install tests
-check each .rpm against the pin before installing it, and its site build checks every .rpm it
-publishes.
+CI's keyring, so the published `plasma-drop.asc` and the keyring package carry the committed
+certificate. Its install tests check each .rpm against the pin before installing it, and its site
+check verifies every signature on the site against the pin.
 
-**Where it signs.** `packages`' sign job runs after `linux-assets` (rpm-sign in pkg-pages' pinned
-Fedora 44 image) and uploads the signed files as one artifact (`pkg-pages-rpm`), which
-`checksums` and the later jobs use instead of the build's `unsigned-linux-rpm-<arch>`, so the
-checksums and the release page see only the signed files. No build runs in a job that holds the
-key. Its repo job (in pkg-pages' Debian trixie image: the runner's rpm 4.18 can't read a pin with
-a revoked subkey) signs the metadata and also signs the .rpm files of the earlier releases it
-republishes. The release's own is already signed and stays byte-identical, while those from
-before the key, or signed by a since-revoked subkey, differ from their release page copies (and
-checksums) by the signature. `pages` only adds the provenance badge to the site and deploys it,
-so the key and the Pages deploy token never share a job.
+**Where it signs.** The key exists in two of `packages`' jobs only. Its sign job runs after
+`linux-assets` (rpm-sign in pkg-pages' pinned Fedora 44 image) and uploads the signed files as one
+artifact (`pkg-pages-rpm`), which `checksums` and the later jobs use instead of the build's
+`unsigned-linux-rpm-<arch>`, so the checksums and the release page see only the signed files. Its
+seal job signs the repository metadata (`InRelease`, `repomd.xml`) and `pkg-pages.tsv`, after a
+build job without the key has parsed the packages and built the site. No build runs in a job that
+holds the key. Earlier releases' .rpm files stay as the site's manifest proves them; one the
+current subkey didn't sign (after a rotation) is signed again with it, so it differs from its
+release page copy (and checksums) by the signature. `pages` only adds the provenance badge to the
+site and deploys it, so the key and the Pages deploy token never share a job.
 
 **Secret.** The subkey lives only in the `linux-signing` GitHub environment, used only by
-`packages`' sign and repo jobs (the reusable workflow sets `environment: linux-signing`, and
+`packages`' sign and seal jobs (the reusable workflow sets `environment: linux-signing`, and
 `release.yml` maps the secret to it):
 
 | Secret             | Value                                                                         |
@@ -276,7 +280,8 @@ so the key and the Pages deploy token never share a job.
 | `REPO_SIGNING_KEY` | one signing subkey, armored, without a passphrase (`ci-key`, below)           |
 
 Settings → Environments → New environment `linux-signing`, deployment branches: only `master`
-(optionally required reviewers). Don't keep it as a repository secret. Both release workflows run
+(optionally required reviewers, who are then asked twice per release, for sign and seal). Don't
+keep it as a repository secret. Both release workflows run
 on `master`; never add tag patterns.
 
 **Making the key.** On the maintainer's machine, not in CI, in a keyring kept for it (`gpg`
@@ -284,8 +289,8 @@ asks for the passphrase). RSA 4096 is what every supported rpm, dnf and apt (sqv
 primary can only certify; the subkey can only sign. `<DIR>` is a private directory used only for
 this key (for example `~/.local/share/package-signing/gnupg`), `<FPR>` the primary's fingerprint
 and `<SUB>` the subkey's. `ci-key` is pkg-pages'
-[`tools/ci-key`](https://github.com/ziptie-soft/pkg-pages/blob/v1.1.1/tools/ci-key) (see its
-[signing guide](https://github.com/ziptie-soft/pkg-pages/blob/v1.1.1/docs/signing.md)). The
+[`tools/ci-key`](https://github.com/ziptie-soft/pkg-pages/blob/v2.0.0/tools/ci-key) (see its
+[signing guide](https://github.com/ziptie-soft/pkg-pages/blob/v2.0.0/docs/signing.md)). The
 commands work in fish and bash:
 
 ```sh
@@ -305,14 +310,20 @@ which revokes the whole key even if the keyring is lost. Commit `repo.asc` in th
 that updates the README's install commands to the signed ones (the index page shows them); the
 next release is the first signed one.
 
-**Rotating or revoking the subkey.** Users trust the primary, so a subkey change needs no action
-from them beyond the `plasma-drop.asc` they fetch. Before the subkey expires, or if the secret
-leaks: with the offline keyring, revoke the old subkey if it leaked
-(`gpg --homedir <DIR> --edit-key <FPR>`, `key N`, `revkey`, `save`), add a new one with `--quick-add-key`, export `repo.asc` again and set
-the secret from `ci-key` for the new one. Commit `repo.asc`: until then, pkg-pages refuses a
-subkey the pin doesn't know, and once a revocation is committed it refuses the revoked one. Users
-then get the revocation with the next `plasma-drop.asc` they fetch; dnf refuses packages signed
-by the revoked subkey, and the next site build re-signs the earlier releases' with the new one.
+**Rotating or revoking the subkey.** Users trust the primary, so a subkey change asks no new
+trust of them. Keep a standby signing subkey in the pin (`gpg --homedir <DIR> --quick-add-key
+<FPR> rsa4096 sign never`, then export and commit `repo.asc`, and release), so every client's
+copy of the key already lists it. To rotate, before the subkey expires: first switch CI to the
+standby (`ci-key --homedir <DIR> <STANDBY> | gh secret set REPO_SIGNING_KEY --env linux-signing`)
+and release, which re-signs the earlier releases' .rpm files with it; only then revoke the old
+subkey (`gpg --homedir <DIR> --edit-key <FPR>`, `key N`, `revkey`, reason "superseded", `save`),
+add the next standby, commit `repo.asc` and release. Never switch CI to a subkey published only in
+the same release: dnf5 caches the repository key at first use, and pkg-pages refuses a subkey the
+committed pin doesn't list. If the secret leaks, don't wait: revoke the subkey, add a new one,
+commit `repo.asc`, then set the secret (releases fail in between, which is intended). APT users
+get new subkeys and revocations through `plasma-drop-keyring` with `apt upgrade`; DNF never
+fetches a key again on its own, so DNF users apply a revocation by hand
+([pkg-pages' signing guide](https://github.com/ziptie-soft/pkg-pages/blob/v2.0.0/docs/signing.md#rotating-or-revoking-the-subkey)).
 If the primary itself leaks, import the revocation certificate (remove the `:` before `-----BEGIN` first),
 commit the revoked `repo.asc` (every release fails from then on), and start over with a new key;
 users have to fetch it again.
@@ -444,9 +455,8 @@ sudo dnf install plasma-drop
 ### APT repository
 
 ```bash
-sudo install -d -m 0755 /etc/apt/keyrings
-sudo curl -fsSLo /etc/apt/keyrings/plasma-drop.asc https://skellla.github.io/plasma-drop/plasma-drop.asc
-echo 'deb [signed-by=/etc/apt/keyrings/plasma-drop.asc] https://skellla.github.io/plasma-drop/deb stable main' | sudo tee /etc/apt/sources.list.d/plasma-drop.list
+sudo curl -fsSLo /usr/share/keyrings/plasma-drop-keyring.asc https://skellla.github.io/plasma-drop/plasma-drop.asc
+sudo curl -fsSLo /etc/apt/sources.list.d/plasma-drop.list https://skellla.github.io/plasma-drop/deb/plasma-drop.list
 sudo apt update
-sudo apt install plasma-drop
+sudo apt install plasma-drop-keyring plasma-drop
 ```
