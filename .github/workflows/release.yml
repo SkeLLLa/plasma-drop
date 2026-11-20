@@ -102,14 +102,14 @@ jobs:
 
       # `make check` includes lint-deny; same version as ci.yml's deny job and .mise.toml.
       - name: Install cargo-deny
-        uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: cargo-deny@0.20.2
 
       # `make check` includes lint-complexity and lint-js. mise 2026.10.14, pinned by checksum;
       # mise.lock pins the tools (the action adds --locked).
       - name: Install cccc and fallow (versions from .mise.toml)
-        uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
           version: 2026.10.14
           sha256: 50be7185bcf75929f01cc5630276bcb43ca367f7c5b176e2580903d28c611dc4
@@ -150,7 +150,7 @@ jobs:
           build-warnings: warn
 
       - name: Install cargo-binstall
-        uses: cargo-bins/cargo-binstall@851112458b5f28a29e5bc14a690c3f283d9dcc6f # v1.26.2
+        uses: cargo-bins/cargo-binstall@5885714d0a40a14b2535c6ffc051fd8e49aa9665 # v1.27.0
 
       # Install via cargo-binstall like release-plz/action does: it picks the gnu build, while
       # install-action only ships musl builds, which fail parsing the changelog template since
@@ -707,7 +707,7 @@ jobs:
       # The checksums job attested them, hence attest: link.
       - name: Sign packslip manifest
         id: packslip
-        uses: jdx/packslip@44e50e5f64551234b4a382d991bd7f7f7d021d06 # v1.11.3
+        uses: jdx/packslip@e0340e0c1d10c90a434de2b90f3a1ba345923564 # v1.11.4
         with:
           artifacts: dist/plasma-drop-*-unknown-linux-gnu.tar.gz
           bin: plasma-drop
@@ -758,7 +758,7 @@ jobs:
       # The version .mise.toml pins; install-action has no packslip manifest, so it uses
       # cargo-binstall.
       - name: Install packslip
-        uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: packslip@1.11.1
 
@@ -1006,7 +1006,7 @@ jobs:
           persist-credentials: false
 
       - name: Install packslip
-        uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: packslip@1.11.1
 

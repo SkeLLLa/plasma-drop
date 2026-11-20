@@ -43,7 +43,7 @@ jobs:
           persist-credentials: false
       # mise 2026.10.14, pinned by checksum. mise.lock pins the tools (the action adds --locked).
       - name: Install bats (version from .mise.toml)
-        uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
           version: 2026.10.14
           sha256: 50be7185bcf75929f01cc5630276bcb43ca367f7c5b176e2580903d28c611dc4
@@ -84,7 +84,7 @@ jobs:
           persist-credentials: false
       # mise 2026.10.14, pinned by checksum. mise.lock pins the tools (the action adds --locked).
       - name: Install jactionlint, shellcheck, bats (versions from .mise.toml)
-        uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
           version: 2026.10.14
           sha256: 50be7185bcf75929f01cc5630276bcb43ca367f7c5b176e2580903d28c611dc4
@@ -123,7 +123,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/master' }}
       # mise 2026.10.14, pinned by checksum. mise.lock pins the tools (the action adds --locked).
       - name: Install cccc (version from .mise.toml)
-        uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
           version: 2026.10.14
           sha256: 50be7185bcf75929f01cc5630276bcb43ca367f7c5b176e2580903d28c611dc4
@@ -149,7 +149,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Run fallow (version from .mise.toml)
-        uses: fallow-rs/fallow@90833be1e8d12202e6f6084c417585e3b78005ce # v3.40.0
+        uses: fallow-rs/fallow@ab762fb12b040889025f7d52902d86c3a26911c0 # v3.42.0
         with:
           version: 3.37.0
           config: fallow.toml
@@ -237,7 +237,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Install cargo-deny
-        uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: cargo-deny@0.20.2
       - name: Check licenses, bans, sources and advisories
