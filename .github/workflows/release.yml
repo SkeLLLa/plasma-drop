@@ -102,14 +102,14 @@ jobs:
 
       # `make check` includes lint-deny; same version as ci.yml's deny job and .mise.toml.
       - name: Install cargo-deny
-        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2.90.6
         with:
           tool: cargo-deny@0.20.2
 
       # `make check` includes lint-complexity and lint-js. mise 2026.10.14, pinned by checksum;
       # mise.lock pins the tools (the action adds --locked).
       - name: Install cccc and fallow (versions from .mise.toml)
-        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
+        uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
         with:
           version: 2026.10.14
           sha256: 50be7185bcf75929f01cc5630276bcb43ca367f7c5b176e2580903d28c611dc4
@@ -758,7 +758,7 @@ jobs:
       # The version .mise.toml pins; install-action has no packslip manifest, so it uses
       # cargo-binstall.
       - name: Install packslip
-        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2.90.6
         with:
           tool: packslip@1.11.1
 
@@ -1006,7 +1006,7 @@ jobs:
           persist-credentials: false
 
       - name: Install packslip
-        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2.90.6
         with:
           tool: packslip@1.11.1
 
